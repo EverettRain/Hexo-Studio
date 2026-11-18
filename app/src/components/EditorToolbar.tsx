@@ -22,6 +22,7 @@ import { useEffect, useRef, useState } from "react";
 import type { ImageFormat } from "@/lib/api";
 import {
   codeBlock,
+  gallery,
   hexoBlock,
   link,
   rule,
@@ -69,6 +70,7 @@ const LISTS: { kind: ListKind; icon: LucideIcon; label: string; key: string }[] 
 /** Less frequent blocks: a rule, and the anzhiyu tag plugins this blog's posts use, written the way its posts write them. */
 const INSERTS: { label: string; hint: string; cmd: MdCommand }[] = [
   { label: "分割线", hint: "---", cmd: rule },
+  { label: "相册", hint: "gallery", cmd: gallery },
   { label: "提示 · 信息", hint: "note info", cmd: hexoBlock("{% note info flat %}", "{% endnote %}", "内容") },
   { label: "提示 · 警告", hint: "note warning", cmd: hexoBlock("{% note warning flat %}", "{% endnote %}", "内容") },
   { label: "提示 · 危险", hint: "note danger", cmd: hexoBlock("{% note danger flat %}", "{% endnote %}", "内容") },

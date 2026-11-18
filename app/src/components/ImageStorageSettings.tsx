@@ -4,8 +4,9 @@ import { useEffect, useState } from "react";
 import { Group } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
+import { Segmented } from "@/components/ui/segmented";
 import { useToast } from "@/components/ui/toast";
-import { api, errorText, type ImageFormat, type ImageSettings, type Storage } from "@/lib/api";
+import { api, errorText, type ImageFormat, type ImageSettings, type InsertStyle, type Storage } from "@/lib/api";
 
 type Kind = "none" | Storage["kind"];
 
@@ -45,6 +46,7 @@ export function ImageStorageSettings() {
   const [storage, setStorage] = useState<Storage | null>(null);
   const [name, setName] = useState("");
   const [format, setFormat] = useState<ImageFormat>("webp");
+  const [style, setStyle] = useState<InsertStyle>("image");
   const [quality, setQuality] = useState(82);
   const [maxEdge, setMaxEdge] = useState(2560);
   const [keyId, setKeyId] = useState("");
@@ -58,6 +60,7 @@ export function ImageStorageSettings() {
     setStorage(s.storage);
     setName(s.name ?? "");
     setFormat(s.upload.format);
+    setStyle(s.upload.style);
     setQuality(s.upload.quality);
     setMaxEdge(s.upload.maxEdge);
     setKeyId(s.accessKeyId ?? "");
@@ -83,7 +86,7 @@ export function ImageStorageSettings() {
         await api.saveImageSettings({
           name: name.trim() || null,
           storage,
-          upload: { format, quality, maxEdge },
+          upload: { format, style, quality, maxEdge },
           accessKeyId: keyId.trim() || null,
           accessKeySecret: secret.trim() || null,
           backupDir: backupDir.trim() || null,
@@ -119,6 +122,7 @@ export function ImageStorageSettings() {
     JSON.stringify(storage) !== JSON.stringify(saved.storage) ||
     (name.trim() || null) !== saved.name ||
     format !== saved.upload.format ||
+    style !== saved.upload.style ||
     quality !== saved.upload.quality ||
     maxEdge !== saved.upload.maxEdge ||
     keyId.trim() !== (saved.accessKeyId ?? "") ||
@@ -192,6 +196,16 @@ export function ImageStorageSettings() {
           </>
         )}
 
+        <Field label="插入图片的写法" hint="文章里看到的都是图片和名称；点一张图可以单独改成别的写法、设宽度和说明。">
+          <Segmented
+            value={style}
+            onChange={setStyle}
+            options={[
+              { value: "image", label: "主题图片标签 {% image %}" },
+              { value: "markdown", label: "Markdown ![]()" },
+            ]}
+          />
+        </Field>
         <Field label="默认上传格式">
           <Select value={format} onChange={(e) => setFormat(e.target.value as ImageFormat)}>
             <option value="webp">WebP（推荐）</option>

@@ -1,4 +1,5 @@
 import { ensureSyntaxTree, syntaxTree } from "@codemirror/language";
+import { findImages, renderImage, restyle } from "@/lib/imageMarkup";
 import { EditorSelection, type ChangeSpec, type EditorState, type Line, type SelectionRange, type TransactionSpec } from "@codemirror/state";
 
 /** Toolbar and shortcut edits: each takes the state and returns the edit, or null when there is nothing to do. */
@@ -198,6 +199,23 @@ export function hexoBlock(open: string, close: string, placeholder: string): MdC
     return insertBlock(`${open}\n${inner}\n${close}`)(state.update({ selection: EditorSelection.range(from, to) }).state);
   };
 }
+
+/**
+ * An anzhiyu gallery around the selected lines. The theme reads only Markdown images inside it,
+ * and its pattern (`![alt](url "title")`) fails on an imsize `=400x`; the gallery sizes rows
+ * itself. So images there become plain Markdown, keeping their caption as alt.
+ */
+export const gallery: MdCommand = (state) => {
+  const r = state.selection.main;
+  if (r.empty) return insertBlock("{% gallery %}\n\n{% endgallery %}", [14, 14])(state);
+  const from = state.doc.lineAt(r.from).from;
+  const to = state.doc.lineAt(r.to).to;
+  let inner = state.doc.sliceString(from, to);
+  for (const img of findImages(inner).reverse()) {
+    inner = inner.slice(0, img.from) + renderImage({ ...restyle(img, "markdown"), width: "", height: "" }) + inner.slice(img.to);
+  }
+  return insertBlock(`{% gallery %}\n${inner}\n{% endgallery %}`)(state.update({ selection: EditorSelection.range(from, to) }).state);
+};
 
 /** What the toolbar shows as on at the cursor. */
 export interface FormatState {

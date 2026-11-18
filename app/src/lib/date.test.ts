@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { fromInputValue, nowIn, toInputValue } from "./date";
+import { formatWritten, monthGrid, nowIn, parseWritten } from "./date";
 
 describe("nowIn", () => {
   it("writes the time in the blog's zone, not the machine's", () => {
@@ -14,25 +14,40 @@ describe("nowIn", () => {
   });
 });
 
-describe("date input conversion", () => {
-  it("goes both ways for the blog's way of writing dates", () => {
+describe("written dates", () => {
+  it("go both ways, adding seconds when they were left out", () => {
     // Act
-    const input = toInputValue("2025-11-24 01:14:20");
+    const p = parseWritten("2025-11-24 01:14");
 
     // Assert
-    expect(input).toBe("2025-11-24T01:14:20");
-    expect(fromInputValue(input!)).toBe("2025-11-24 01:14:20");
+    expect(p).toEqual({ year: 2025, month: 11, day: 24, hour: 1, minute: 14, second: 0 });
+    expect(formatWritten(p!)).toBe("2025-11-24 01:14:00");
   });
 
-  it("adds seconds the input leaves out", () => {
+  it("are null when written another way", () => {
     // Act / Assert
-    expect(fromInputValue("2025-11-24T01:14")).toBe("2025-11-24 01:14:00");
-    expect(toInputValue("2025-11-24 01:14")).toBe("2025-11-24T01:14:00");
+    expect(parseWritten("2025-11-24T01:14:20+08:00")).toBeNull();
+    expect(parseWritten("")).toBeNull();
   });
 
-  it("gives null for dates written another way", () => {
-    // Act / Assert
-    expect(toInputValue("2025-11-24T01:14:20+08:00")).toBeNull();
-    expect(toInputValue("")).toBeNull();
+  it("keep a day past the end of a shorter month inside it", () => {
+    // Act
+    const s = formatWritten({ year: 2024, month: 2, day: 31, hour: 9, minute: 5, second: 0 });
+
+    // Assert
+    expect(s).toBe("2024-02-29 09:05:00");
+  });
+});
+
+describe("month grid", () => {
+  it("covers the month in Monday-first weeks", () => {
+    // Act: 1 November 2025 is a Saturday.
+    const grid = monthGrid(2025, 11);
+
+    // Assert
+    expect(grid.length % 7).toBe(0);
+    expect(grid[0]).toEqual({ year: 2025, month: 10, day: 27, inMonth: false });
+    expect(grid[5]).toEqual({ year: 2025, month: 11, day: 1, inMonth: true });
+    expect(grid.filter((d) => d.inMonth).map((d) => d.day)).toEqual(Array.from({ length: 30 }, (_, i) => i + 1));
   });
 });

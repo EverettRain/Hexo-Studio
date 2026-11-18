@@ -1,17 +1,20 @@
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { AlertTriangle, ChevronLeft, ExternalLink, FolderSearch, PanelRightClose, PanelRightOpen, Search, Send } from "lucide-react";
+import { AlertTriangle, ChevronLeft, Code2, ExternalLink, FolderSearch, PanelRightClose, PanelRightOpen, Search, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EditorToolbar } from "@/components/EditorToolbar";
-import { FrontMatterBar, FrontMatterPanel } from "@/components/FrontMatterForm";
+import { FrontMatterHeader } from "@/components/FrontMatterHeader";
+import { ImageStylePopover } from "@/components/ImageStylePopover";
 import { MarkdownEditor, type EditorHandle } from "@/components/MarkdownEditor";
 import { PreviewPane } from "@/components/PreviewPane";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
-import { ImagePicker } from "@/components/ImagePicker";
-import { api, errorText, type BlogConfigView, type ImageFormat, type Ingested, type PageProbe, type PostFile, type PostSummary, type PreviewState } from "@/lib/api";
+import { ImagePicker, type PickPurpose } from "@/components/ImagePicker";
+import { api, errorText, type BlogConfigView, type ImageFormat, type InsertStyle, type Ingested, type Library, type PageProbe, type PostFile, type PostSummary, type PreviewState } from "@/lib/api";
 import { applyEdits } from "@/lib/frontmatter";
+import { newImage, renderImage, type FoundImage, type ImageMarkup } from "@/lib/imageMarkup";
+import { describeImage, indexImages } from "@/lib/images";
 import { wordCount, type FormatState } from "@/lib/markdownCommands";
 import { usePageActive } from "@/lib/pageActive";
 import { cn } from "@/lib/utils";
@@ -74,11 +77,20 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
   const [storageReady, setStorageReady] = useState(false);
   const [uploading, setUploading] = useState(0);
   const [dropping, setDropping] = useState(false);
-  const [picking, setPicking] = useState(false);
-  const [metaOpen, setMetaOpen] = useState(false);
+  const [picking, setPicking] = useState<PickPurpose | null>(null);
   const [fmt, setFmt] = useState<FormatState | null>(null);
   const words = useMemo(() => wordCount(body), [body]);
-  const closeMeta = useCallback(() => setMetaOpen(false), []);
+  const [insertStyle, setInsertStyle] = useState<InsertStyle>("image");
+  const [library, setLibrary] = useState<Library | null>(null);
+  const [cards, setCards] = useState(true);
+  /** The image whose style is being edited: where its markup is now, and its card on screen. */
+  const [styling, setStyling] = useState<{ found: FoundImage; rect: DOMRect } | null>(null);
+  const imageIndex = useMemo(() => indexImages(library?.images ?? [], library?.thumbQuery ?? null), [library]);
+  const imageDisplay = useMemo(() => ({ index: imageIndex, cards }), [imageIndex, cards]);
+
+  const loadLibrary = useCallback(() => {
+    api.imageLibrary().then(setLibrary, () => {});
+  }, []);
 
   // Read again whenever the page is shown: the store may have been set up in settings meanwhile.
   useEffect(() => {
@@ -86,11 +98,13 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
     api.imageSettings().then(
       (s) => {
         setFormat(s.upload.format);
+        setInsertStyle(s.upload.style);
         setStorageReady(!!s.storage && !!s.accessKeyId);
       },
       () => {},
     );
-  }, [active]);
+    loadLibrary();
+  }, [active, loadLibrary]);
 
   /**
    * Each image gets a placeholder at the cursor at once, replaced by its link when the upload
@@ -110,7 +124,7 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
         tagged.map(async (t) => {
           try {
             const r = await t.run();
-            editor.current?.replace(t.mark, `![](${r.image.url})`);
+            editor.current?.replace(t.mark, newImage(r.image.url, insertStyle));
             toast(
               r.existed
                 ? `图库里已有这张图（${r.image.name}），直接引用`
@@ -124,8 +138,9 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
           }
         }),
       );
+      loadLibrary();
     },
-    [storageReady, toast],
+    [storageReady, toast, insertStyle, loadLibrary],
   );
 
   const uploadPaths = useCallback(
@@ -301,6 +316,24 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
     }
   };
 
+  /** Rewrites the image being styled; it stays selected at its new length. */
+  const applyStyle = (markup: ImageMarkup) => {
+    if (!styling) return;
+    const text = renderImage(markup);
+    const { from, to } = styling.found;
+    editor.current?.replaceRange(from, to, text);
+    setStyling({ ...styling, found: { ...styling.found, ...markup, from, to: from + text.length } });
+  };
+
+  const setImageKey = (key: "cover" | "top_img", url: string, name: string) => {
+    try {
+      setYaml((y) => applyEdits(y, { [key]: url }));
+      toast(`已设为${key === "cover" ? "封面" : "顶部图"}：${name}`);
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+  };
+
   const suggestions = useMemo(() => {
     const tags = new Set<string>();
     const cats = new Set<string>();
@@ -370,6 +403,14 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
         <span className={cn("text-[12px]", state === "error" || state === "conflict" ? "text-danger" : "text-muted")} title={saveError ?? undefined}>
           {statusText[state]}
         </span>
+        <button
+          title={cards ? "图片显示为源码（手工改写时用）" : "图片显示为图片和名称"}
+          aria-pressed={!cards}
+          onClick={() => setCards((c) => !c)}
+          className={cn("flex h-[26px] w-[26px] items-center justify-center rounded-[7px] text-muted hover:bg-pill hover:text-fg", !cards && "bg-pill text-fg")}
+        >
+          <Code2 className="h-[15px] w-[15px]" />
+        </button>
         <button title="查找与替换  ⌘F" onClick={() => editor.current?.openSearch()} className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] text-muted hover:bg-pill hover:text-fg">
           <Search className="h-[15px] w-[15px]" />
         </button>
@@ -399,23 +440,40 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
       {state === "error" && saveError && <div className="selectable shrink-0 bg-danger-soft px-4 py-2 text-[12.5px] text-danger">{saveError}</div>}
 
       <ImagePicker
-        open={picking}
-        onClose={() => setPicking(false)}
+        open={picking !== null}
+        purpose={picking ?? "insert"}
+        onClose={() => setPicking(null)}
         postId={id}
-        onInsert={(img) => {
-          setPicking(false);
-          editor.current?.insert(`![](${img.url})`);
+        onPick={(img) => {
+          const purpose = picking;
+          setPicking(null);
+          if (purpose === "insert") editor.current?.insert(newImage(img.url, insertStyle));
+          else if (purpose === "replace" && styling) applyStyle({ ...styling.found, url: img.url });
+          else if (purpose === "cover" || purpose === "top_img") setImageKey(purpose, img.url, img.name);
         }}
         onCover={(img) => {
-          setPicking(false);
-          try {
-            setYaml(applyEdits(yaml, { cover: img.url }));
-            toast(`已设为封面：${img.name}`);
-          } catch (e) {
-            toast(errorText(e), "error");
-          }
+          setPicking(null);
+          setImageKey("cover", img.url, img.name);
         }}
       />
+      {styling && (
+        <ImageStylePopover
+          markup={styling.found}
+          info={describeImage(imageIndex, styling.found.url)}
+          anchor={styling.rect}
+          onChange={applyStyle}
+          onReplace={() => setPicking("replace")}
+          onRemove={() => {
+            editor.current?.replaceRange(styling.found.from, styling.found.to, "");
+            setStyling(null);
+          }}
+          onClose={() => {
+            // A press on another image opens that one before this one hears the press outside.
+            const mine = styling;
+            setStyling((s) => (s === mine ? null : s));
+          }}
+        />
+      )}
       <Dialog
         open={publishing !== null}
         onClose={() => publishing === "ask" && setPublishing(null)}
@@ -444,50 +502,45 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
             format={fmt}
             run={(cmd) => editor.current?.run(cmd)}
             onUpload={() => void chooseImages()}
-            onLibrary={() => setPicking(true)}
+            onLibrary={() => setPicking("insert")}
             imageFormat={format}
             onImageFormat={setFormat}
             uploading={uploading}
           />
-          <div className="relative flex min-h-0 flex-1 flex-col">
-            <div className="shrink-0 border-b-[0.5px] border-line-2">
-              <FrontMatterBar yaml={yaml} open={metaOpen} onOpenChange={setMetaOpen} />
-            </div>
-            {/* Absolute, so CodeMirror gets a definite height to scroll in rather than growing past the status bar. */}
-            <div className="relative min-h-0 flex-1">
-              <div className="absolute inset-0">
-                <MarkdownEditor
-                  handle={editor}
-                  value={body}
-                  onChange={setBody}
-                  onSave={() => void save()}
-                  onFormat={setFmt}
-                  onPasteImages={(files) => void uploadImages(files.map((f) => ({ label: f.name || "截图", run: () => api.uploadImageBytes(id, f, pastedName(f), format) })))}
-                />
-              </div>
-            </div>
-            <div className="flex h-6 shrink-0 items-center gap-3 border-t-[0.5px] border-line-2 px-4 text-[11px] tabular-nums text-muted">
-              {fmt && (
-                <span>
-                  第 {fmt.line} 行，第 {fmt.column} 列
-                </span>
-              )}
-              <span className="flex-1" />
-              <span title="中日韩文字按字、其他文字按词计，不含代码块、图片、链接地址和标签插件">{words.toLocaleString()} 字</span>
-            </div>
-            {/* Over the body only: the preview beside it shows each change as it is saved. */}
-            {metaOpen && (
-              <FrontMatterPanel
-                className="absolute inset-x-0 bottom-0 top-9"
+          {/* The article header and the body scroll as one page. */}
+          <div className="relative min-h-0 flex-1">
+            <div className="absolute inset-0 overflow-y-auto" onScroll={() => styling && setStyling(null)}>
+              <FrontMatterHeader
                 yaml={yaml}
                 onChange={setYaml}
                 onError={(m) => toast(m, "error")}
                 timezone={config.timezone}
                 tagSuggestions={suggestions.tags}
                 categorySuggestions={suggestions.categories}
-                onClose={closeMeta}
+                images={imageIndex}
+                onPickImage={setPicking}
+                onEnterBody={() => editor.current?.focusStart()}
               />
+              <MarkdownEditor
+                handle={editor}
+                value={body}
+                onChange={setBody}
+                onSave={() => void save()}
+                onFormat={setFmt}
+                images={imageDisplay}
+                onImageOpen={(found, rect) => setStyling({ found, rect })}
+                onPasteImages={(files) => void uploadImages(files.map((f) => ({ label: f.name || "截图", run: () => api.uploadImageBytes(id, f, pastedName(f), format) })))}
+              />
+            </div>
+          </div>
+          <div className="flex h-6 shrink-0 items-center gap-3 border-t-[0.5px] border-line-2 px-4 text-[11px] tabular-nums text-muted">
+            {fmt && (
+              <span>
+                第 {fmt.line} 行，第 {fmt.column} 列
+              </span>
             )}
+            <span className="flex-1" />
+            <span title="中日韩文字按字、其他文字按词计，不含代码块、图片、链接地址和标签插件">{words.toLocaleString()} 字</span>
           </div>
         </div>
         {showPreview && (

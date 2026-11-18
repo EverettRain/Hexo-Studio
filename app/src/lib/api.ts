@@ -141,8 +141,12 @@ export type Storage =
 
 export type ImageFormat = "webp" | "original";
 
+/** How a new image is written into a post (see `lib/imageMarkup`). */
+export type InsertStyle = "image" | "markdown";
+
 export interface UploadSettings {
   format: ImageFormat;
+  style: InsertStyle;
   quality: number;
   maxEdge: number;
 }

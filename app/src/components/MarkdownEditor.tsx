@@ -6,6 +6,8 @@ import { EditorState } from "@codemirror/state";
 import { drawSelection, EditorView, keymap, placeholder } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
 import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
+import { imageOpener, imageWidgets, setImageDisplay, type ImageDisplay } from "@/components/imageWidgets";
+import type { FoundImage } from "@/lib/imageMarkup";
 import { formatAt, link, setHeading, toggleInline, toggleList, toggleQuote, type FormatState, type MdCommand } from "@/lib/markdownCommands";
 
 const highlight = HighlightStyle.define([
@@ -23,9 +25,10 @@ const highlight = HighlightStyle.define([
 ]);
 
 const theme = EditorView.theme({
-  "&": { height: "100%", fontSize: "14px", backgroundColor: "transparent", color: "rgb(var(--fg))" },
+  // No height of its own: the page scrolls the article header and the body together.
+  "&": { fontSize: "14px", backgroundColor: "transparent", color: "rgb(var(--fg))" },
   "&.cm-focused": { outline: "none" },
-  ".cm-scroller": { fontFamily: "inherit", lineHeight: "1.75", padding: "16px 0 40vh" },
+  ".cm-scroller": { fontFamily: "inherit", lineHeight: "1.75", padding: "8px 0 40vh" },
   ".cm-content": { maxWidth: "820px", padding: "0 24px", caretColor: "rgb(var(--fg))" },
   ".cm-cursor": { borderLeftColor: "rgb(var(--fg))" },
   "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": { backgroundColor: "rgb(var(--brand) / 0.22) !important" },
@@ -66,6 +69,10 @@ export interface EditorHandle {
   /** Applies a toolbar edit and puts the focus back in the text. */
   run: (cmd: MdCommand) => void;
   openSearch: () => void;
+  /** Puts the cursor at the start of the body. */
+  focusStart: () => void;
+  /** Replaces a range (an image's markup) without moving the cursor or the focus. */
+  replaceRange: (from: number, to: number, text: string) => void;
   /** Inserts text at the cursor (on a line of its own) and focuses the editor. */
   insert: (text: string) => void;
   /** Replaces the first occurrence of `from`; false when it is gone (deleted meanwhile). */
@@ -80,6 +87,9 @@ interface MarkdownEditorProps {
   onPasteImages?: (files: File[]) => void;
   /** The formatting at the cursor, whenever it may have changed. */
   onFormat?: (format: FormatState) => void;
+  /** How images are shown, and the library that names them. */
+  images: ImageDisplay;
+  onImageOpen?: (found: FoundImage, rect: DOMRect) => void;
   handle?: Ref<EditorHandle>;
 }
 
@@ -87,11 +97,11 @@ interface MarkdownEditorProps {
  * CodeMirror 6 for the post body. The text is the editor's own after mounting; a `value` that
  * differs from it (a reload from disk) replaces it.
  */
-export function MarkdownEditor({ value, onChange, onSave, onPasteImages, onFormat, handle }: MarkdownEditorProps) {
+export function MarkdownEditor({ value, onChange, onSave, onPasteImages, onFormat, images, onImageOpen, handle }: MarkdownEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
-  const handlers = useRef({ onChange, onSave, onPasteImages, onFormat });
-  handlers.current = { onChange, onSave, onPasteImages, onFormat };
+  const handlers = useRef({ onChange, onSave, onPasteImages, onFormat, onImageOpen });
+  handlers.current = { onChange, onSave, onPasteImages, onFormat, onImageOpen };
 
   useImperativeHandle(
     handle,
@@ -105,6 +115,15 @@ export function MarkdownEditor({ value, onChange, onSave, onPasteImages, onForma
       },
       openSearch: () => {
         if (view.current) openSearchPanel(view.current);
+      },
+      focusStart: () => {
+        const v = view.current;
+        if (!v) return;
+        v.dispatch({ selection: { anchor: 0 }, scrollIntoView: true });
+        v.focus();
+      },
+      replaceRange: (from, to, text) => {
+        view.current?.dispatch({ changes: { from, to, insert: text } });
       },
       insert: (text) => {
         const v = view.current;
@@ -148,6 +167,8 @@ export function MarkdownEditor({ value, onChange, onSave, onPasteImages, onForma
             indentWithTab,
           ]),
           markdown({ base: markdownLanguage }),
+          imageWidgets,
+          imageOpener.of((found, rect) => handlers.current.onImageOpen?.(found, rect)),
           syntaxHighlighting(highlight),
           EditorView.lineWrapping,
           placeholder("正文…"),
@@ -170,15 +191,20 @@ export function MarkdownEditor({ value, onChange, onSave, onPasteImages, onForma
     });
     view.current = v;
     handlers.current.onFormat?.(formatAt(v.state));
+    v.dispatch({ effects: setImageDisplay.of(images) });
     return () => v.destroy();
     // Created once; later values arrive through the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
+    view.current?.dispatch({ effects: setImageDisplay.of(images) });
+  }, [images]);
+
+  useEffect(() => {
     const v = view.current;
     if (v && v.state.doc.toString() !== value) v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: value } });
   }, [value]);
 
-  return <div ref={host} className="selectable h-full min-h-0" />;
+  return <div ref={host} className="selectable" />;
 }

@@ -30,11 +30,22 @@ pub fn prepare(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// How a new image is written into a post: the theme's `{% image %}` tag (what this blog's posts
+/// use) or plain Markdown. The editor writes and reads the markup; this only remembers the choice.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum InsertStyle {
+    #[default]
+    Image,
+    Markdown,
+}
+
 /// How images are uploaded for this blog.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", default)]
 pub struct UploadSettings {
     pub format: Format,
+    pub style: InsertStyle,
     /// WebP quality, 1–100.
     pub quality: u8,
     /// Longest edge of an uploaded WebP, in pixels; larger images are scaled down.
@@ -43,7 +54,7 @@ pub struct UploadSettings {
 
 impl Default for UploadSettings {
     fn default() -> Self {
-        UploadSettings { format: Format::Webp, quality: 82, max_edge: 2560 }
+        UploadSettings { format: Format::Webp, style: InsertStyle::Image, quality: 82, max_edge: 2560 }
     }
 }
 
@@ -197,6 +208,21 @@ mod tests {
 
         // Assert
         assert_eq!(load_catalog(root.path()).unwrap().images.len(), 8);
+    }
+
+    #[test]
+    fn settings_saved_before_the_insert_style_existed_use_the_image_tag() {
+        // Arrange
+        let root = tempfile::tempdir().unwrap();
+        prepare(root.path()).unwrap();
+        std::fs::write(dir(root.path()).join("settings.json"), r#"{"upload":{"format":"original","quality":70,"maxEdge":1600}}"#).unwrap();
+
+        // Act
+        let s = load_settings(root.path()).unwrap();
+
+        // Assert
+        assert_eq!(s.upload.style, InsertStyle::Image);
+        assert_eq!(s.upload.format, Format::Original);
     }
 
     #[test]

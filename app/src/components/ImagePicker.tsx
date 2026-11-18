@@ -6,17 +6,29 @@ import { api, errorText, type Library, type LibraryImage } from "@/lib/api";
 import { matchesImage, thumbUrl, usesPost } from "@/lib/images";
 import { cn } from "@/lib/utils";
 
+/** What the chosen image is for: the dialog's title and main button follow it. */
+export type PickPurpose = "insert" | "replace" | "cover" | "top_img";
+
+const PURPOSE: Record<PickPurpose, { title: string; action: string }> = {
+  insert: { title: "从图库选图", action: "插入到光标处" },
+  replace: { title: "换一张图", action: "换成这张" },
+  cover: { title: "选择封面", action: "设为封面" },
+  top_img: { title: "选择顶部图", action: "设为顶部图" },
+};
+
 interface ImagePickerProps {
   open: boolean;
+  purpose: PickPurpose;
   onClose: () => void;
   /** The post being edited, e.g. `_posts/x.md`. */
   postId: string;
-  onInsert: (img: LibraryImage) => void;
-  onCover: (img: LibraryImage) => void;
+  onPick: (img: LibraryImage) => void;
+  /** Offered beside inserting: the same picture as the post's cover. */
+  onCover?: (img: LibraryImage) => void;
 }
 
 /** Choosing an image from the project's library: this post's, or any other page's. */
-export function ImagePicker({ open, onClose, postId, onInsert, onCover }: ImagePickerProps) {
+export function ImagePicker({ open, purpose, onClose, postId, onPick, onCover }: ImagePickerProps) {
   const [library, setLibrary] = useState<Library | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [scope, setScope] = useState<"post" | "all">("post");
@@ -46,16 +58,18 @@ export function ImagePicker({ open, onClose, postId, onInsert, onCover }: ImageP
     <Dialog
       open={open}
       onClose={onClose}
-      title="从图库选图"
+      title={PURPOSE[purpose].title}
       className="max-w-[820px]"
       footer={
         <>
           <span className="mr-auto self-center truncate text-[12px] text-muted">{chosen ? `${chosen.name} · ${chosen.width}×${chosen.height}` : "选一张图"}</span>
-          <Button variant="outline" disabled={!chosen} onClick={() => chosen && onCover(chosen)}>
-            设为封面
-          </Button>
-          <Button disabled={!chosen} onClick={() => chosen && onInsert(chosen)}>
-            插入到光标处
+          {purpose === "insert" && onCover && (
+            <Button variant="outline" disabled={!chosen} onClick={() => chosen && onCover(chosen)}>
+              设为封面
+            </Button>
+          )}
+          <Button disabled={!chosen} onClick={() => chosen && onPick(chosen)}>
+            {PURPOSE[purpose].action}
           </Button>
         </>
       }
@@ -86,7 +100,7 @@ export function ImagePicker({ open, onClose, postId, onInsert, onCover }: ImageP
             <button
               key={img.id}
               onClick={() => setPicked(img.id)}
-              onDoubleClick={() => onInsert(img)}
+              onDoubleClick={() => onPick(img)}
               title={`${img.name}\n${img.description}`}
               className={cn("overflow-hidden rounded-lg bg-card-2 text-left shadow-card active:!scale-100", picked === img.id && "ring-2 ring-brand")}
             >

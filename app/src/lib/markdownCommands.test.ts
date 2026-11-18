@@ -1,7 +1,7 @@
 import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { EditorSelection, EditorState } from "@codemirror/state";
 import { describe, expect, it } from "vitest";
-import { codeBlock, formatAt, hexoBlock, link, rule, setHeading, table, toggleInline, toggleList, toggleQuote, wordCount, type MdCommand } from "./markdownCommands";
+import { codeBlock, formatAt, gallery, hexoBlock, link, rule, setHeading, table, toggleInline, toggleList, toggleQuote, wordCount, type MdCommand } from "./markdownCommands";
 
 /** A state from text where `|` is the cursor, or `‹` … `›` the selection (anchor first). */
 function state(marked: string): EditorState {
@@ -150,6 +150,21 @@ describe("blocks", () => {
     // Act / Assert
     expect(run(note, "|")).toBe("{% note info flat %}\n‹内容›\n{% endnote %}");
     expect(run(note, "a\n‹tip›\nb")).toBe("a\n\n{% note info flat %}\ntip\n{% endnote %}|\n\nb");
+  });
+});
+
+describe("galleries", () => {
+  it("rewrite images inside as the plain Markdown the theme's gallery reads", () => {
+    // Act
+    const after = run(gallery, "‹{% image a.webp, width=400px, alt=路 %}\n![](b.webp =300x)›");
+
+    // Assert
+    expect(after).toBe("{% gallery %}\n![路](a.webp)\n![](b.webp)\n{% endgallery %}|");
+  });
+
+  it("open empty with the cursor inside", () => {
+    // Act / Assert
+    expect(run(gallery, "|")).toBe("{% gallery %}\n|\n{% endgallery %}");
   });
 });
 
