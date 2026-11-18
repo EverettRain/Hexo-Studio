@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { api, errorText, type Library, type LibraryImage } from "@/lib/api";
-import { matchesImage, thumbUrl, usesPost } from "@/lib/images";
+import { matchesImage, usesPost } from "@/lib/images";
 import { cn } from "@/lib/utils";
 
 /** What the chosen image is for: the dialog's title and main button follow it. */
@@ -104,7 +104,7 @@ export function ImagePicker({ open, purpose, onClose, postId, onPick, onCover }:
               title={`${img.name}\n${img.description}`}
               className={cn("overflow-hidden rounded-lg bg-card-2 text-left shadow-card active:!scale-100", picked === img.id && "ring-2 ring-brand")}
             >
-              <img src={thumbUrl(img.url, library?.thumbQuery ?? null)} alt="" loading="lazy" className="aspect-[4/3] w-full bg-pill object-cover" />
+              <img src={img.thumb} alt="" loading="lazy" className="aspect-[4/3] w-full bg-pill object-cover" />
               <div className="truncate px-2 py-1 text-[12px]">{img.name}</div>
             </button>
           ))}

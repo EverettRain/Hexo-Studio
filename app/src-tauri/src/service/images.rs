@@ -3,18 +3,29 @@
 
 use crate::domain::catalog::{Image, Original};
 use crate::domain::image_key::{self, Format};
+use crate::domain::storage::Storage;
 use crate::infra::image_encode;
 use crate::infra::keychain;
-use crate::infra::project::{self, ProjectSettings};
+use crate::infra::project::{self, Profile, ProjectSettings, UploadSettings};
 use crate::infra::store::Store;
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
-/// The store a project uploads to, with its credentials from the keychain.
-pub fn open_store(settings: &ProjectSettings) -> Result<Store, String> {
-    let storage = settings.storage.as_ref().ok_or("还没有设置图片存储（设置 → 图片存储）。")?;
-    let creds = keychain::load(&storage.credential_account())?.ok_or("钥匙串里没有这个存储桶的 AccessKey，请在设置里填写。")?;
+/// A store with its credentials from the keychain.
+pub fn open_store(storage: &Storage) -> Result<Store, String> {
+    let creds = keychain::load(&storage.credential_account())?.ok_or("钥匙串里没有这个存储桶的 AccessKey，请在图片页的存储配置里填写。")?;
     Store::open(storage, &creds)
+}
+
+/// Where new images go.
+pub fn active_profile(settings: &ProjectSettings) -> Result<&Profile, String> {
+    settings.active_profile().ok_or_else(|| "还没有图片存储配置：在图片页新建一套。".to_string())
+}
+
+/// The store that holds an image: the profile whose addresses it is under.
+pub fn store_for(settings: &ProjectSettings, image: &Image) -> Result<Store, String> {
+    let profile = settings.profile_for_url(&image.url).ok_or("没有哪套存储配置包含这张图的地址（配置可能已删除或改过）。")?;
+    open_store(&profile.storage)
 }
 
 /// The extension of the bytes themselves, for a pasted image without a name.
@@ -24,10 +35,10 @@ fn sniffed_ext(bytes: &[u8]) -> String {
 
 /// The bytes to upload, their extension and pixel size: WebP (off the async threads, it takes
 /// a while for a large photo) or the original.
-async fn convert(bytes: Vec<u8>, ext: &str, format: Format, settings: &ProjectSettings) -> Result<(Vec<u8>, String, u32, u32), String> {
+async fn convert(bytes: Vec<u8>, ext: &str, format: Format, upload: &UploadSettings) -> Result<(Vec<u8>, String, u32, u32), String> {
     match format {
         Format::Webp => {
-            let (quality, max_edge) = (settings.upload.quality, settings.upload.max_edge);
+            let (quality, max_edge) = (upload.quality, upload.max_edge);
             let ext2 = ext.to_string();
             let e = tokio::task::spawn_blocking(move || image_encode::to_webp(&bytes, &ext2, quality, max_edge))
                 .await
@@ -69,17 +80,18 @@ pub struct Ingested {
     pub original_bytes: usize,
 }
 
-/// Takes an image in: same content already in the library → that record; otherwise the original
-/// is kept in `<backup>/<project>/<uid>-<name>` (before anything is uploaded), converted, put at
-/// `<prefix><project>/<uid>.<ext>` and recorded in `images.json`.
+/// Takes an image in through the active profile: same content already in the library → that
+/// record; otherwise the original is kept in `<backup>/<project>/<uid>-<name>` (before anything is
+/// uploaded), converted, put at `<prefix><project>/<uid>.<ext>` and recorded in `images.json`.
 pub async fn ingest(root: &Path, settings: &ProjectSettings, backup_dir: &Path, inc: Incoming) -> Result<Ingested, String> {
-    let storage = settings.storage.clone().ok_or("还没有设置图片存储（设置 → 图片存储）。")?;
+    let profile = active_profile(settings)?;
+    let storage = &profile.storage;
     let id = image_key::content_id(&inc.bytes);
     let original_bytes = inc.bytes.len();
     if let Some(found) = project::load_catalog(root)?.get(&id).cloned() {
         return Ok(Ingested { image: found, existed: true, original_bytes });
     }
-    let store = open_store(settings)?;
+    let store = open_store(storage)?;
     let project_name = project::project_name(root, settings);
     let file_name = match &inc.file_name {
         Some(n) if !image_key::split_name(n).1.is_empty() => n.clone(),
@@ -99,7 +111,7 @@ pub async fn ingest(root: &Path, settings: &ProjectSettings, backup_dir: &Path, 
     }
 
     let format = image_key::output_format(&ext, inc.format);
-    let (body, out_ext, width, height) = convert(inc.bytes, &ext, format, settings).await?;
+    let (body, out_ext, width, height) = convert(inc.bytes, &ext, format, &profile.upload).await?;
     let key = image_key::object_key(&storage.prefix(), &project_name, &id, &out_ext);
     let bytes = body.len() as u64;
     store.put(&key, body, image_key::content_type(&out_ext)).await?;
@@ -154,10 +166,10 @@ pub async fn check(store: &Store, http: &reqwest::Client, image: &Image, now: i6
     }
 }
 
-/// Removes an image from the store and the library; its kept original stays on this Mac.
+/// Removes an image from its store and the library; its kept original stays on this Mac.
 pub async fn delete(root: &Path, settings: &ProjectSettings, id: &str) -> Result<(), String> {
     let image = project::load_catalog(root)?.get(id).cloned().ok_or("图片库里没有这张图。")?;
-    open_store(settings)?.delete(&image.key).await?;
+    store_for(settings, &image)?.delete(&image.key).await?;
     project::update_catalog(root, |c| Ok(c.remove(id).map(|_| ())))?;
     Ok(())
 }

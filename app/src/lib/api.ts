@@ -151,26 +151,39 @@ export interface UploadSettings {
   maxEdge: number;
 }
 
-export interface ImageSettings {
+/** One complete way of storing images: a store and how images are uploaded to it. */
+export interface Profile {
+  id: string;
+  name: string;
+  storage: Storage;
+  upload: UploadSettings;
+  /** Saved in the keychain for this store; the secret is never sent back. */
+  accessKeyId: string | null;
+  /** Library images whose addresses are in this store. */
+  images: number;
+}
+
+export interface StorageSettings {
   /** The name image paths use now. */
   projectName: string;
   /** Set by hand; null means the folder name. */
   name: string | null;
-  storage: Storage | null;
-  upload: UploadSettings;
-  /** Saved in the keychain for this store; the secret is never sent back. */
-  accessKeyId: string | null;
+  profiles: Profile[];
+  /** The profile new images go to. */
+  active: string | null;
+  /** Where originals are kept on this Mac. */
   backupDir: string;
 }
 
-export interface ImageSettingsInput {
-  name: string | null;
-  storage: Storage | null;
+export interface ProfileInput {
+  /** null creates a profile. */
+  id: string | null;
+  name: string;
+  storage: Storage;
   upload: UploadSettings;
   accessKeyId: string | null;
   /** Empty keeps the saved secret. */
   accessKeySecret: string | null;
-  backupDir: string | null;
 }
 
 export interface Mirror {
@@ -210,6 +223,10 @@ export interface LibraryImage extends ImageRecord {
   usedBy: string[];
   check: ImageCheck | null;
   backupPath: string | null;
+  /** A small version (scaled by the store when it can), else the image itself. */
+  thumb: string;
+  /** The profile whose store holds it; null when none does any more. */
+  profile: string | null;
 }
 
 export interface Library {
@@ -218,8 +235,6 @@ export interface Library {
   unadopted: number;
   /** Titles of posts and pages by file. */
   titles: Record<string, string>;
-  /** Appended to an image address for a thumbnail, when the store can scale. */
-  thumbQuery: string | null;
 }
 
 export interface Ingested {
@@ -282,9 +297,13 @@ export const api = {
   cancelRun: () => invoke<void>("cancel_run"),
   listRuns: () => invoke<Run[]>("list_runs"),
   openUrl: (url: string) => invoke<void>("open_url", { url }),
-  imageSettings: () => invoke<ImageSettings>("image_settings"),
-  saveImageSettings: (input: ImageSettingsInput) => invoke<ImageSettings>("save_image_settings", { input }),
-  checkStorage: () => invoke<void>("check_storage"),
+  storageProfiles: () => invoke<StorageSettings>("storage_profiles"),
+  saveProfile: (input: ProfileInput) => invoke<StorageSettings>("save_profile", { input }),
+  deleteProfile: (id: string) => invoke<StorageSettings>("delete_profile", { id }),
+  activateProfile: (id: string) => invoke<StorageSettings>("activate_profile", { id }),
+  saveLibrarySettings: (input: { name: string | null; backupDir: string | null }) => invoke<StorageSettings>("save_library_settings", { input }),
+  /** Tries the form's values before saving; an empty secret uses the saved one. */
+  checkStorage: (storage: Storage, accessKeyId: string | null, accessKeySecret: string | null) => invoke<void>("check_storage", { storage, accessKeyId, accessKeySecret }),
   imageLibrary: () => invoke<Library>("image_library"),
   updateImage: (id: string, patch: { name: string; description: string; ok: boolean | null; mirrors: Mirror[] }) =>
     invoke<ImageRecord>("update_image", { id, patch }),

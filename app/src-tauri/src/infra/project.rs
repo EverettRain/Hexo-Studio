@@ -58,15 +58,86 @@ impl Default for UploadSettings {
     }
 }
 
+/// One complete way of storing images: a store and how images are uploaded to it. A blog may
+/// have several (two buckets, or one bucket written two ways) and switch between them.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Profile {
+    pub id: String,
+    pub name: String,
+    pub storage: Storage,
+    #[serde(default)]
+    pub upload: UploadSettings,
+}
+
 /// `.hexostudio/settings.json`: settings that belong to the blog and may be committed with it.
 /// Secrets never go here (see `keychain`).
 #[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", default)]
+#[serde(rename_all = "camelCase", from = "SavedSettings")]
 pub struct ProjectSettings {
     /// The project's name in image paths; empty means the folder's name.
     pub name: Option<String>,
-    pub storage: Option<Storage>,
-    pub upload: UploadSettings,
+    pub profiles: Vec<Profile>,
+    /// The profile new images go to; the first one when unset or gone.
+    pub active: Option<String>,
+}
+
+/// The file as written by any version: before profiles it held one `storage` and `upload`.
+#[derive(Default, Deserialize)]
+#[serde(rename_all = "camelCase", default)]
+struct SavedSettings {
+    name: Option<String>,
+    profiles: Vec<Profile>,
+    active: Option<String>,
+    storage: Option<Storage>,
+    upload: Option<UploadSettings>,
+}
+
+/// The id a store set up before profiles gets.
+const FIRST_PROFILE: &str = "default";
+
+impl From<SavedSettings> for ProjectSettings {
+    fn from(s: SavedSettings) -> Self {
+        let mut profiles = s.profiles;
+        let mut active = s.active;
+        if profiles.is_empty() {
+            if let Some(storage) = s.storage {
+                profiles.push(Profile { id: FIRST_PROFILE.into(), name: storage.label(), storage, upload: s.upload.unwrap_or_default() });
+                active = Some(FIRST_PROFILE.into());
+            }
+        }
+        ProjectSettings { name: s.name, profiles, active }
+    }
+}
+
+impl ProjectSettings {
+    /// Where new images go.
+    pub fn active_profile(&self) -> Option<&Profile> {
+        self.active.as_deref().and_then(|id| self.profile(id)).or(self.profiles.first())
+    }
+
+    pub fn profile(&self, id: &str) -> Option<&Profile> {
+        self.profiles.iter().find(|p| p.id == id)
+    }
+
+    /// The profile whose store holds the object at `url`: the active one when several do (one
+    /// bucket set up twice), else the first; `None` when no store serves it (its profile was
+    /// deleted, or the image is from elsewhere).
+    pub fn profile_for_url(&self, url: &str) -> Option<&Profile> {
+        let active = self.active_profile().filter(|p| p.storage.serves(url));
+        active.or_else(|| self.profiles.iter().find(|p| p.storage.serves(url)))
+    }
+
+    /// Every store's address forms, for finding the library's images in the blog's text.
+    pub fn all_bases(&self) -> Vec<String> {
+        let mut out: Vec<String> = Vec::new();
+        for b in self.profiles.iter().flat_map(|p| p.storage.bases()) {
+            if !out.contains(&b) {
+                out.push(b);
+            }
+        }
+        out
+    }
 }
 
 fn settings_path(root: &Path) -> PathBuf {
@@ -147,7 +218,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn settings_default_to_webp_and_the_folder_name() {
+    fn settings_default_to_no_store_and_the_folder_name() {
         // Arrange
         let root = tempfile::tempdir().unwrap();
         let blog = root.path().join("EverettBlog");
@@ -157,8 +228,59 @@ mod tests {
         let s = load_settings(&blog).unwrap();
 
         // Assert
-        assert_eq!(s.upload.format, Format::Webp);
+        assert!(s.active_profile().is_none());
         assert_eq!(project_name(&blog, &s), "EverettBlog");
+    }
+
+    fn aliyun(bucket: &str) -> Storage {
+        Storage::AliyunOss { bucket: bucket.into(), area: "oss-cn-shanghai".into(), path: String::new(), custom_url: String::new() }
+    }
+
+    fn profile(id: &str, storage: Storage) -> Profile {
+        Profile { id: id.into(), name: id.into(), storage, upload: UploadSettings::default() }
+    }
+
+    #[test]
+    fn profiles_and_the_active_one_read_back() {
+        // Arrange
+        let root = tempfile::tempdir().unwrap();
+        let s = ProjectSettings {
+            name: None,
+            profiles: vec![profile("a", aliyun("one")), profile("b", aliyun("two"))],
+            active: Some("b".into()),
+        };
+
+        // Act
+        save_settings(root.path(), &s).unwrap();
+        let back = load_settings(root.path()).unwrap();
+
+        // Assert
+        assert_eq!(back, s);
+        assert_eq!(back.active_profile().unwrap().id, "b");
+    }
+
+    #[test]
+    fn a_missing_active_profile_falls_back_to_the_first() {
+        // Arrange
+        let s = ProjectSettings { name: None, profiles: vec![profile("a", aliyun("one"))], active: Some("deleted".into()) };
+
+        // Act / Assert
+        assert_eq!(s.active_profile().unwrap().id, "a");
+    }
+
+    #[test]
+    fn an_image_belongs_to_the_profile_whose_store_serves_it() {
+        // Arrange
+        let s = ProjectSettings {
+            name: None,
+            profiles: vec![profile("one", aliyun("one")), profile("two", aliyun("two")), profile("two-again", aliyun("two"))],
+            active: Some("two-again".into()),
+        };
+
+        // Act / Assert
+        assert_eq!(s.profile_for_url("https://one.oss-cn-shanghai.aliyuncs.com/Blog/a.webp").unwrap().id, "one");
+        assert_eq!(s.profile_for_url("https://two.oss-cn-shanghai.aliyuncs.com/Blog/a.webp").unwrap().id, "two-again");
+        assert!(s.profile_for_url("https://elsewhere.example/a.webp").is_none());
     }
 
     #[test]
@@ -211,18 +333,45 @@ mod tests {
     }
 
     #[test]
-    fn settings_saved_before_the_insert_style_existed_use_the_image_tag() {
+    fn a_store_saved_before_profiles_becomes_the_active_profile() {
         // Arrange
         let root = tempfile::tempdir().unwrap();
         prepare(root.path()).unwrap();
-        std::fs::write(dir(root.path()).join("settings.json"), r#"{"upload":{"format":"original","quality":70,"maxEdge":1600}}"#).unwrap();
+        let old = r#"{"name":"EverettBlog","storage":{"kind":"aliyunOss","bucket":"hexo-image-storage","area":"oss-cn-shanghai","path":"","customUrl":""},"upload":{"format":"original","quality":70,"maxEdge":1600}}"#;
+        std::fs::write(dir(root.path()).join("settings.json"), old).unwrap();
 
         // Act
         let s = load_settings(root.path()).unwrap();
 
         // Assert
-        assert_eq!(s.upload.style, InsertStyle::Image);
-        assert_eq!(s.upload.format, Format::Original);
+        let p = s.active_profile().unwrap();
+        assert_eq!(s.profiles.len(), 1);
+        assert_eq!(p.storage, aliyun("hexo-image-storage"));
+        assert_eq!((p.upload.format, p.upload.quality, p.upload.max_edge), (Format::Original, 70, 1600));
+        // The insert style did not exist yet: the image tag, as the blog's posts write images.
+        assert_eq!(p.upload.style, InsertStyle::Image);
+        assert_eq!(s.name.as_deref(), Some("EverettBlog"));
+    }
+
+    #[test]
+    fn a_migrated_store_is_saved_as_a_profile() {
+        // Arrange
+        let root = tempfile::tempdir().unwrap();
+        prepare(root.path()).unwrap();
+        std::fs::write(
+            dir(root.path()).join("settings.json"),
+            r#"{"storage":{"kind":"aliyunOss","bucket":"b","area":"oss-cn-shanghai","path":"","customUrl":""}}"#,
+        )
+        .unwrap();
+
+        // Act
+        save_settings(root.path(), &load_settings(root.path()).unwrap()).unwrap();
+        let text = std::fs::read_to_string(dir(root.path()).join("settings.json")).unwrap();
+
+        // Assert
+        let json: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert!(json.get("storage").is_none());
+        assert_eq!(json["profiles"][0]["storage"]["bucket"], "b");
     }
 
     #[test]

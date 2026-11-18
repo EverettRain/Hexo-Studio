@@ -157,7 +157,7 @@ function ProjectWindow({ status, info, theme, onThemeChange, onStatus, onClose }
         )}
       </PageSlot>
       <PageSlot active={page === "images"}>
-        <ImagesPage onOpenSettings={() => setPage("settings")} onOpenPost={(id) => void openPost(id)} />
+        <ImagesPage onOpenPost={(id) => void openPost(id)} />
       </PageSlot>
       <PageSlot active={page === "deploy"}>
         <DeployPage config={config} />

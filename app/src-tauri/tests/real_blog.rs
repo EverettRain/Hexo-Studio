@@ -187,8 +187,9 @@ fn adoption_covers_every_image_of_the_bucket_in_the_blog_and_the_checklist() {
         path: String::new(),
         custom_url: String::new(),
     };
+    let profile = hexo_studio_lib::infra::project::Profile { id: "oss".into(), name: "oss".into(), storage, upload: Default::default() };
     let settings =
-        hexo_studio_lib::infra::project::ProjectSettings { name: Some("EverettBlog".into()), storage: Some(storage), ..Default::default() };
+        hexo_studio_lib::infra::project::ProjectSettings { name: Some("EverettBlog".into()), profiles: vec![profile], active: None };
     let rows = std::env::var("HEXO_STUDIO_TEST_CHECKLIST")
         .ok()
         .map(|p| hexo_studio_lib::domain::catalog::parse_checklist(&std::fs::read_to_string(p).unwrap()).unwrap())

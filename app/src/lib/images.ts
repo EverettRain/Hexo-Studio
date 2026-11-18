@@ -1,9 +1,4 @@
-import type { ImageRecord } from "@/lib/api";
-
-/** A small version for thumbnails when the store can scale (Aliyun), else the image itself. */
-export function thumbUrl(url: string, thumbQuery: string | null): string {
-  return thumbQuery ? `${url}${url.includes("?") ? "&" : "?"}${thumbQuery}` : url;
-}
+import type { ImageRecord, LibraryImage } from "@/lib/api";
 
 export function sizeText(n: number): string {
   return n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
@@ -36,10 +31,10 @@ export type ImageIndex = ReadonlyMap<string, ImageInfo>;
 const bare = (url: string) => url.split(/[?#]/)[0];
 
 /** Library images by address, current and from before adoption. */
-export function indexImages(images: ImageRecord[], thumbQuery: string | null): ImageIndex {
+export function indexImages(images: LibraryImage[]): ImageIndex {
   const index = new Map<string, ImageInfo>();
   for (const img of images) {
-    const info: ImageInfo = { id: img.id, name: img.name, thumb: thumbUrl(img.url, thumbQuery), width: img.width, height: img.height };
+    const info: ImageInfo = { id: img.id, name: img.name, thumb: img.thumb, width: img.width, height: img.height };
     for (const u of [img.url, ...img.legacyUrls]) index.set(bare(u), info);
   }
   return index;

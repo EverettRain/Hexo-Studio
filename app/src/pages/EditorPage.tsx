@@ -85,21 +85,22 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
   const [cards, setCards] = useState(true);
   /** The image whose style is being edited: where its markup is now, and its card on screen. */
   const [styling, setStyling] = useState<{ found: FoundImage; rect: DOMRect } | null>(null);
-  const imageIndex = useMemo(() => indexImages(library?.images ?? [], library?.thumbQuery ?? null), [library]);
+  const imageIndex = useMemo(() => indexImages(library?.images ?? []), [library]);
   const imageDisplay = useMemo(() => ({ index: imageIndex, cards }), [imageIndex, cards]);
 
   const loadLibrary = useCallback(() => {
     api.imageLibrary().then(setLibrary, () => {});
   }, []);
 
-  // Read again whenever the page is shown: the store may have been set up in settings meanwhile.
+  // Read again whenever the page is shown: the profile may have been switched or set up meanwhile.
   useEffect(() => {
     if (!active) return;
-    api.imageSettings().then(
+    api.storageProfiles().then(
       (s) => {
-        setFormat(s.upload.format);
-        setInsertStyle(s.upload.style);
-        setStorageReady(!!s.storage && !!s.accessKeyId);
+        const p = s.profiles.find((x) => x.id === s.active);
+        setFormat(p?.upload.format ?? "webp");
+        setInsertStyle(p?.upload.style ?? "image");
+        setStorageReady(!!p?.accessKeyId);
       },
       () => {},
     );
@@ -114,7 +115,7 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
     async (items: { label: string; run: () => Promise<Ingested> }[]) => {
       if (!items.length) return;
       if (!storageReady) {
-        toast("还没有设置图片存储：设置 → 图片存储", "error");
+        toast("还没有可用的图片存储配置：在“图片”页新建一套，并填好 AccessKey", "error");
         return;
       }
       const tagged = items.map((it, i) => ({ ...it, mark: `![上传中：${it.label}…](#${Date.now().toString(36)}${i})` }));

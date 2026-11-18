@@ -2,12 +2,13 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import { Copy, Download, FileUp, FolderSearch, ImagePlus, Inbox, Loader2, Plus, Search, ShieldCheck, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdoptionDialog } from "@/components/AdoptionDialog";
+import { LibrarySettingsDialog, ProfileDialog, ProfileSwitcher } from "@/components/StorageProfiles";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label, Select, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { api, errorText, onEvent, type ImageFormat, type Library, type LibraryImage, type Mirror } from "@/lib/api";
-import { matchesImage, sizeText, thumbUrl } from "@/lib/images";
+import { api, errorText, onEvent, type Library, type LibraryImage, type Mirror, type Profile, type StorageSettings } from "@/lib/api";
+import { matchesImage, sizeText } from "@/lib/images";
 import { usePageActive } from "@/lib/pageActive";
 import { cn } from "@/lib/utils";
 
@@ -25,7 +26,7 @@ function StatusDot({ img }: { img: LibraryImage }) {
 }
 
 /** The hand-kept fields of one image, edited in the side panel. */
-function Details({ img, library, onSaved, onDeleted, onOpenPost }: { img: LibraryImage; library: Library; onSaved: () => void; onDeleted: () => void; onOpenPost: (id: string) => void }) {
+function Details({ img, library, profileName, onSaved, onDeleted, onOpenPost }: { img: LibraryImage; library: Library; profileName: string | null; onSaved: () => void; onDeleted: () => void; onOpenPost: (id: string) => void }) {
   const toast = useToast();
   const [name, setName] = useState(img.name);
   const [description, setDescription] = useState(img.description);
@@ -68,7 +69,7 @@ function Details({ img, library, onSaved, onDeleted, onOpenPost }: { img: Librar
     <div className="flex h-full min-h-0 flex-col">
       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-3">
         <a href={img.url} target="_blank" rel="noreferrer" onClick={(e) => (e.preventDefault(), void api.openUrl(img.url).catch(() => {}))} className="block overflow-hidden rounded-lg bg-pill shadow-card">
-          <img src={thumbUrl(img.url, library.thumbQuery)} alt="" className="max-h-56 w-full object-contain" />
+          <img src={img.thumb} alt="" className="max-h-56 w-full object-contain" />
         </a>
         <div className="space-y-1">
           <Label>图片名称</Label>
@@ -120,6 +121,9 @@ function Details({ img, library, onSaved, onDeleted, onOpenPost }: { img: Librar
           </div>
           <div>
             uid <span className="selectable font-mono">{img.id}</span> · 上传 {img.uploadedAt || "—"}
+          </div>
+          <div className={cn(!profileName && "text-warn")} title={profileName ? undefined : "检查和删除要用这张图所在存储的配置"}>
+            存储配置：{profileName ?? "没有哪套配置包含这个地址"}
           </div>
           <div>
             {img.format === "webp" ? "WebP" : "原图"} · {img.width}×{img.height} · {sizeText(img.bytes)}
@@ -190,12 +194,11 @@ function Details({ img, library, onSaved, onDeleted, onOpenPost }: { img: Librar
 }
 
 interface ImagesPageProps {
-  onOpenSettings: () => void;
   onOpenPost: (id: string) => void;
 }
 
-/** The project's image library: every image, where it is used, its hand-kept fields. */
-export function ImagesPage({ onOpenSettings, onOpenPost }: ImagesPageProps) {
+/** The project's image library: every image, where it is used, its hand-kept fields; and the storage profiles it uploads with. */
+export function ImagesPage({ onOpenPost }: ImagesPageProps) {
   const toast = useToast();
   const active = usePageActive();
   const [library, setLibrary] = useState<Library | null>(null);
@@ -205,26 +208,40 @@ export function ImagesPage({ onOpenSettings, onOpenPost }: ImagesPageProps) {
   const [checking, setChecking] = useState<[number, number] | null>(null);
   const [uploading, setUploading] = useState(0);
   const [adopting, setAdopting] = useState(false);
-  const [format, setFormat] = useState<ImageFormat>("webp");
-  const [storageReady, setStorageReady] = useState<boolean | null>(null);
+  const [storage, setStorage] = useState<StorageSettings | null>(null);
+  /** The profile dialog: `null` profile creates one. */
+  const [editing, setEditing] = useState<{ profile: Profile | null } | null>(null);
+  const [libSettings, setLibSettings] = useState(false);
+  const activeProfile = storage?.profiles.find((p) => p.id === storage.active) ?? null;
 
   const load = useCallback(() => {
     api.imageLibrary().then(setLibrary, (e) => toast(errorText(e), "error"));
   }, [toast]);
-  useEffect(() => {
-    if (active && storageReady) load();
-  }, [active, storageReady, load]);
-  // Read again whenever the page is shown: the store may have been set up in settings meanwhile.
+  const loadStorage = useCallback(() => {
+    api.storageProfiles().then(setStorage, (e) => toast(errorText(e), "error"));
+  }, [toast]);
   useEffect(() => {
     if (!active) return;
-    api.imageSettings().then(
-      (s) => {
-        setFormat(s.upload.format);
-        setStorageReady(!!s.storage && !!s.accessKeyId);
-      },
-      () => setStorageReady(false),
-    );
-  }, [active]);
+    loadStorage();
+    load();
+  }, [active, load, loadStorage]);
+
+  /** After a profile changed: the library's counts and owners follow the profiles. */
+  const storageChanged = (s: StorageSettings) => {
+    setStorage(s);
+    setEditing(null);
+    load();
+  };
+  const switchTo = async (id: string) => {
+    try {
+      const s = await api.activateProfile(id);
+      setStorage(s);
+      toast(`新图片将传到“${s.profiles.find((p) => p.id === id)?.name ?? id}”`);
+      load();
+    } catch (e) {
+      toast(errorText(e), "error");
+    }
+  };
 
   const images = library?.images ?? [];
   const counts = { all: images.length, unused: images.filter((i) => !i.usedBy.length).length, problem: images.filter(hasProblem).length };
@@ -241,7 +258,7 @@ export function ImagesPage({ onOpenSettings, onOpenPost }: ImagesPageProps) {
     setUploading(paths.length);
     for (const p of paths) {
       try {
-        const r = await api.uploadImageFile(null, p, format);
+        const r = await api.uploadImageFile(null, p, activeProfile?.upload.format ?? "webp");
         toast(r.existed ? `图库里已有这张图：${r.image.name}` : `已入库 ${r.image.name}`);
         setSelected(r.image.id);
       } catch (e) {
@@ -292,13 +309,35 @@ export function ImagesPage({ onOpenSettings, onOpenPost }: ImagesPageProps) {
     }
   };
 
-  if (storageReady === null) return null;
-  if (!storageReady) {
+  const dialogs = storage && (
+    <>
+      <ProfileDialog
+        open={editing !== null}
+        profile={editing?.profile ?? null}
+        projectName={storage.projectName}
+        active={!!editing?.profile && editing.profile.id === storage.active}
+        onClose={() => setEditing(null)}
+        onSaved={storageChanged}
+      />
+      <LibrarySettingsDialog open={libSettings} settings={storage} onClose={() => setLibSettings(false)} onSaved={(s) => (setStorage(s), setLibSettings(false))} />
+    </>
+  );
+
+  if (storage === null) return null;
+  if (!storage.profiles.length) {
     return (
-      <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center text-[13px] text-fg-2">
+      <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center text-[13px] leading-6 text-fg-2">
         <ImagePlus className="h-7 w-7 text-muted" />
-        先在设置里配置图片存储（阿里云 OSS 或 S3 兼容），图片库才能上传和检查图片。
-        <Button onClick={onOpenSettings}>去设置</Button>
+        <div>
+          先新建一套存储配置：一个存储桶（阿里云 OSS 或 S3 兼容）加上传方式。
+          <br />
+          以后可以再建几套，在这里随时切换。
+        </div>
+        <Button onClick={() => setEditing({ profile: null })}>
+          <Plus />
+          新建存储配置
+        </Button>
+        {dialogs}
       </div>
     );
   }
@@ -306,6 +345,13 @@ export function ImagesPage({ onOpenSettings, onOpenPost }: ImagesPageProps) {
   return (
     <div className="flex h-full min-h-0">
       <div className="flex min-w-0 flex-1 flex-col">
+        <ProfileSwitcher
+          settings={storage}
+          onSwitch={(id) => void switchTo(id)}
+          onEdit={(profile) => setEditing({ profile })}
+          onCreate={() => setEditing({ profile: null })}
+          onLibrarySettings={() => setLibSettings(true)}
+        />
         <div className="flex shrink-0 items-center gap-2 px-5 pb-3 pt-1">
           <div className="relative min-w-[110px] flex-1">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
@@ -366,7 +412,7 @@ export function ImagesPage({ onOpenSettings, onOpenPost }: ImagesPageProps) {
                   onClick={() => setSelected(img.id)}
                   className={cn("overflow-hidden rounded-xl bg-card text-left shadow-card active:!scale-100", selected === img.id && "ring-2 ring-brand")}
                 >
-                  <img src={thumbUrl(img.url, library.thumbQuery)} alt="" loading="lazy" className="aspect-[4/3] w-full bg-pill object-cover" />
+                  <img src={img.thumb} alt="" loading="lazy" className="aspect-[4/3] w-full bg-pill object-cover" />
                   <div className="space-y-0.5 px-2.5 py-1.5">
                     <div className="flex items-center gap-1.5">
                       <StatusDot img={img} />
@@ -388,9 +434,15 @@ export function ImagesPage({ onOpenSettings, onOpenPost }: ImagesPageProps) {
               <X className="h-3.5 w-3.5" />
             </button>
           </div>
-          <Details key={current.id + current.name + current.description + String(current.ok)} img={current} library={library} onSaved={load} onDeleted={() => (setSelected(null), load())} onOpenPost={onOpenPost} />
+          <Details
+            key={current.id + current.name + current.description + String(current.ok)}
+            img={current}
+            library={library}
+            profileName={storage.profiles.find((p) => p.id === current.profile)?.name ?? null}
+            onSaved={load} onDeleted={() => (setSelected(null), load())} onOpenPost={onOpenPost} />
         </aside>
       )}
+      {dialogs}
       <AdoptionDialog
         open={adopting}
         onClose={(changed) => {

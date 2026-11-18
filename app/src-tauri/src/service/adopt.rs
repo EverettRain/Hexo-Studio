@@ -7,24 +7,11 @@ use super::images::{self, Incoming};
 use crate::domain::catalog::{self, ChecklistRow};
 use crate::domain::image_key::{self, Format};
 use crate::domain::image_refs::{self, Candidate, Source};
-use crate::domain::storage::Storage;
 use crate::infra::blog::{Blog, PostKind};
 use crate::infra::project::{self, ProjectSettings};
 use serde::Serialize;
 use std::collections::BTreeMap;
 use std::path::Path;
-
-/// Every address form the store's objects may be written with.
-pub fn bases(storage: &Storage) -> Vec<String> {
-    let mut b = vec![storage.public_base()];
-    if let Storage::AliyunOss { bucket, area, path, custom_url } = storage {
-        if !custom_url.trim().is_empty() {
-            let bare = Storage::AliyunOss { bucket: bucket.clone(), area: area.clone(), path: path.clone(), custom_url: String::new() };
-            b.push(bare.public_base());
-        }
-    }
-    b
-}
 
 fn text_files(dir: &Path, out: &mut Vec<std::path::PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
@@ -87,14 +74,16 @@ pub fn sources(blog: &Blog) -> Vec<Source> {
 }
 
 /// Which files use each library image.
+/// Which files use each library image, whichever profile's store holds it.
 pub fn usages(blog: &Blog, settings: &ProjectSettings) -> Result<BTreeMap<String, Vec<String>>, String> {
-    let Some(storage) = &settings.storage else { return Ok(BTreeMap::new()) };
-    Ok(image_refs::usages(&sources(blog), &bases(storage), &project::load_catalog(&blog.root)?))
+    Ok(image_refs::usages(&sources(blog), &settings.all_bases(), &project::load_catalog(&blog.root)?))
 }
 
+/// The active profile's store's images not in the library yet: adopting reads them from that
+/// store and puts them back into it the way the profile uploads.
 pub fn plan(blog: &Blog, settings: &ProjectSettings, checklist: &[ChecklistRow]) -> Result<Vec<Candidate>, String> {
-    let storage = settings.storage.as_ref().ok_or("还没有设置图片存储。")?;
-    Ok(image_refs::adoption(&sources(blog), &bases(storage), &project::load_catalog(&blog.root)?, checklist))
+    let storage = &images::active_profile(settings)?.storage;
+    Ok(image_refs::adoption(&sources(blog), &storage.bases(), &project::load_catalog(&blog.root)?, checklist))
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -139,7 +128,7 @@ pub async fn run(
     now: jiff::civil::DateTime,
     on_progress: impl Fn(Progress),
 ) -> Result<Report, String> {
-    let store = images::open_store(settings)?;
+    let store = images::open_store(&images::active_profile(settings)?.storage)?;
     let candidates = plan(blog, settings, checklist)?;
     let total = candidates.len();
     let mut report = Report::default();

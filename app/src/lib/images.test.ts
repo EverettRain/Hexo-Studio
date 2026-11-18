@@ -1,14 +1,15 @@
 import { describe, expect, it } from "vitest";
-import type { ImageRecord } from "./api";
+import type { LibraryImage } from "./api";
 import { describeImage, indexImages } from "./images";
 
-const record = (over: Partial<ImageRecord>): ImageRecord =>
-  ({ id: "3f9a1c07b2e4", name: "宿舍的路", url: "https://cdn.example/EverettBlog/3f9a1c07b2e4.webp", legacyUrls: [], width: 1280, height: 720, ...over }) as ImageRecord;
+const URL = "https://cdn.example/EverettBlog/3f9a1c07b2e4.webp";
+const record = (over: Partial<LibraryImage>): LibraryImage =>
+  ({ id: "3f9a1c07b2e4", name: "宿舍的路", url: URL, thumb: `${URL}?x-oss-process=image/resize,w_480`, legacyUrls: [], width: 1280, height: 720, ...over }) as LibraryImage;
 
 describe("image names", () => {
   it("come from the library by current or old address, ignoring a query", () => {
     // Arrange
-    const index = indexImages([record({ legacyUrls: ["https://cdn.example/IMG_1442.jpeg"] })], "x-oss-process=image/resize,w_480");
+    const index = indexImages([record({ legacyUrls: ["https://cdn.example/IMG_1442.jpeg"] })]);
 
     // Act
     const now = describeImage(index, "https://cdn.example/EverettBlog/3f9a1c07b2e4.webp?x-oss-process=image/resize,w_800");

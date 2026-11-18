@@ -213,7 +213,7 @@ export function EditorToolbar({ format, run, onUpload, onLibrary, imageFormat, o
       <Tool icon={Images} label="从图库选图（本文或其他页面的）" onClick={onLibrary} />
       <button
         type="button"
-        title="上传格式，点击切换（默认值在设置里改）"
+        title="上传格式，点击切换（默认值在图片页的存储配置里改）"
         onMouseDown={keepFocus}
         onClick={() => onImageFormat(imageFormat === "webp" ? "original" : "webp")}
         className="ml-0.5 h-[22px] shrink-0 rounded-[5px] bg-pill px-1.5 text-[11px] font-medium text-fg-2 hover:bg-pill-hover hover:text-fg active:!scale-100"

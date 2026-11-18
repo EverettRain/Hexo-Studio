@@ -1,6 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
 import { ArrowLeftRight, CheckCircle2, FolderSearch, RotateCcw, XCircle } from "lucide-react";
-import { ImageStorageSettings } from "@/components/ImageStorageSettings";
 import { Group, Row } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
@@ -82,7 +81,6 @@ export function SettingsPage({ status, info, onStatus, onSwitchProject }: Settin
           )}
         </Group>
 
-        {status?.dir && !status.error && <ImageStorageSettings />}
 
         <Group label="Node">
           <Row

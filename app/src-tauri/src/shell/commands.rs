@@ -8,7 +8,8 @@ use crate::domain::storage::Storage;
 use crate::domain::task::Task;
 use crate::infra::blog::{self, Blog, PostFile, PostSummary, WriteOutcome};
 use crate::infra::node_env::{self, NodeEnv};
-use crate::infra::project::UploadSettings;
+use crate::infra::project::{Profile, ProjectSettings, UploadSettings};
+use crate::infra::store::Store;
 use crate::infra::{git, keychain, paths, project, settings};
 use crate::service::adopt;
 use crate::service::images;
@@ -413,92 +414,213 @@ pub fn open_url(app: AppHandle, url: String) -> Result<(), String> {
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ImageSettingsView {
-    /// The name image paths use now.
-    project_name: String,
-    /// Set by hand in `.hexostudio/settings.json`; empty means the folder name.
-    name: Option<String>,
-    storage: Option<Storage>,
-    upload: UploadSettings,
+pub struct ProfileView {
+    #[serde(flatten)]
+    profile: Profile,
     /// The AccessKey ID in the keychain for this store (the secret is never sent back).
     access_key_id: Option<String>,
+    /// Library images whose addresses are in this store.
+    images: usize,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct StorageView {
+    /// The name image paths use now.
+    project_name: String,
+    /// Set by hand; empty means the folder name.
+    name: Option<String>,
+    profiles: Vec<ProfileView>,
+    /// The profile new images go to.
+    active: Option<String>,
+    /// Where originals are kept on this Mac (for every profile and blog).
     backup_dir: String,
 }
 
-fn image_settings_view(root: &Path) -> Result<ImageSettingsView, String> {
+fn storage_view(root: &Path) -> Result<StorageView, String> {
     let s = project::load_settings(root)?;
-    let access_key_id = match &s.storage {
-        Some(st) => keychain::load(&st.credential_account())?.map(|c| c.access_key_id),
-        None => None,
-    };
-    Ok(ImageSettingsView {
+    let catalog = project::load_catalog(root)?;
+    let mut counts: BTreeMap<&str, usize> = BTreeMap::new();
+    for img in &catalog.images {
+        if let Some(p) = s.profile_for_url(&img.url) {
+            *counts.entry(p.id.as_str()).or_default() += 1;
+        }
+    }
+    let profiles = s
+        .profiles
+        .iter()
+        .map(|p| {
+            Ok(ProfileView {
+                access_key_id: keychain::load(&p.storage.credential_account())?.map(|c| c.access_key_id),
+                images: counts.get(p.id.as_str()).copied().unwrap_or(0),
+                profile: p.clone(),
+            })
+        })
+        .collect::<Result<_, String>>()?;
+    Ok(StorageView {
         project_name: project::project_name(root, &s),
         name: s.name.clone(),
-        storage: s.storage.clone(),
-        upload: s.upload.clone(),
-        access_key_id,
+        profiles,
+        active: s.active_profile().map(|p| p.id.clone()),
         backup_dir: settings::load().backup_dir().display().to_string(),
     })
 }
 
 #[tauri::command]
-pub async fn image_settings(ws: Ws<'_>) -> Result<ImageSettingsView, String> {
+pub async fn storage_profiles(ws: Ws<'_>) -> Result<StorageView, String> {
     let root = project_root(&ws)?;
-    blocking(move || image_settings_view(&root)).await
+    blocking(move || storage_view(&root)).await
+}
+
+/// Keys typed into a profile's form: both given replace the keychain entry; the secret empty
+/// keeps the saved one (for the same ID); the ID empty removes it.
+fn save_keys(account: &str, id: Option<String>, secret: Option<String>) -> Result<(), String> {
+    let id = id.map(|v| v.trim().to_string()).unwrap_or_default();
+    let secret = secret.map(|v| v.trim().to_string()).unwrap_or_default();
+    match (id.is_empty(), secret.is_empty()) {
+        (false, false) => keychain::save(account, &keychain::Credentials { access_key_id: id, access_key_secret: secret }),
+        (false, true) => match keychain::load(account)? {
+            Some(c) if c.access_key_id == id => Ok(()),
+            _ => Err("换了 AccessKey ID，请同时填写对应的 Secret。".into()),
+        },
+        (true, _) => keychain::delete(account),
+    }
 }
 
 #[derive(serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
-pub struct ImageSettingsInput {
-    name: Option<String>,
-    storage: Option<Storage>,
+pub struct ProfileInput {
+    /// `None` creates a profile.
+    id: Option<String>,
+    name: String,
+    storage: Storage,
     upload: UploadSettings,
-    /// Both given: replace the keychain entry; secret empty: keep the saved one.
     access_key_id: Option<String>,
     access_key_secret: Option<String>,
-    backup_dir: Option<String>,
 }
 
+/// A new id: unique among the blog's profiles, short enough to read in `settings.json`.
+fn new_profile_id(s: &ProjectSettings) -> String {
+    let base = format!("{:x}", jiff::Timestamp::now().as_millisecond());
+    let mut id = base.clone();
+    let mut n = 1;
+    while s.profile(&id).is_some() {
+        n += 1;
+        id = format!("{base}-{n}");
+    }
+    id
+}
+
+/// Creates or changes a profile; the first one becomes the active one.
 #[tauri::command]
-pub async fn save_image_settings(ws: Ws<'_>, input: ImageSettingsInput) -> Result<ImageSettingsView, String> {
+pub async fn save_profile(ws: Ws<'_>, input: ProfileInput) -> Result<StorageView, String> {
     let root = project_root(&ws)?;
     blocking(move || {
-        if let Some(st) = &input.storage {
-            st.validate()?;
+        input.storage.validate()?;
+        let name = input.name.trim().to_string();
+        if name.is_empty() {
+            return Err("给这套配置起个名字。".into());
         }
-        let quality = input.upload.quality.clamp(1, 100);
-        let upload = UploadSettings { quality, ..input.upload };
+        let upload = UploadSettings { quality: input.upload.quality.clamp(1, 100), ..input.upload };
         let mut s = project::load_settings(&root)?;
-        s.name = input.name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
-        s.storage = input.storage;
-        s.upload = upload;
-        if let Some(st) = &s.storage {
-            let account = st.credential_account();
-            let id = input.access_key_id.map(|v| v.trim().to_string()).unwrap_or_default();
-            let secret = input.access_key_secret.map(|v| v.trim().to_string()).unwrap_or_default();
-            match (id.is_empty(), secret.is_empty()) {
-                (false, false) => keychain::save(&account, &keychain::Credentials { access_key_id: id, access_key_secret: secret })?,
-                (false, true) => match keychain::load(&account)? {
-                    Some(c) if c.access_key_id == id => {}
-                    _ => return Err("换了 AccessKey ID，请同时填写对应的 Secret。".into()),
-                },
-                (true, _) => keychain::delete(&account)?,
+        save_keys(&input.storage.credential_account(), input.access_key_id, input.access_key_secret)?;
+        let id = match input.id {
+            Some(id) => {
+                let p = s.profiles.iter_mut().find(|p| p.id == id).ok_or("这套配置已经不在了。")?;
+                *p = Profile { id: id.clone(), name, storage: input.storage, upload };
+                id
             }
+            None => {
+                let id = new_profile_id(&s);
+                s.profiles.push(Profile { id: id.clone(), name, storage: input.storage, upload });
+                id
+            }
+        };
+        if s.active.as_deref().and_then(|a| s.profile(a)).is_none() {
+            s.active = Some(id);
         }
         project::save_settings(&root, &s)?;
-        let backup = input.backup_dir.map(|d| d.trim().to_string()).filter(|d| !d.is_empty());
-        settings::update(|g| g.backup_dir = backup)?;
-        image_settings_view(&root)
+        storage_view(&root)
     })
     .await
 }
 
-/// Asks the store about a missing object: proves the bucket and keys work without writing.
+/// Removes a profile. Its images stay where they are and keep working on the site; without a
+/// profile for their store they can no longer be checked or deleted from here. The keys go
+/// when no other profile uses the same store.
 #[tauri::command]
-pub async fn check_storage(ws: Ws<'_>) -> Result<(), String> {
+pub async fn delete_profile(ws: Ws<'_>, id: String) -> Result<StorageView, String> {
     let root = project_root(&ws)?;
-    let s = blocking(move || project::load_settings(&root)).await?;
-    images::open_store(&s)?.check().await
+    blocking(move || {
+        let mut s = project::load_settings(&root)?;
+        let removed = s.profile(&id).cloned().ok_or("这套配置已经不在了。")?;
+        s.profiles.retain(|p| p.id != id);
+        let account = removed.storage.credential_account();
+        if !s.profiles.iter().any(|p| p.storage.credential_account() == account) {
+            keychain::delete(&account)?;
+        }
+        if s.active.as_deref() == Some(id.as_str()) {
+            s.active = s.profiles.first().map(|p| p.id.clone());
+        }
+        project::save_settings(&root, &s)?;
+        storage_view(&root)
+    })
+    .await
+}
+
+/// Makes a profile the one new images go to.
+#[tauri::command]
+pub async fn activate_profile(ws: Ws<'_>, id: String) -> Result<StorageView, String> {
+    let root = project_root(&ws)?;
+    blocking(move || {
+        let mut s = project::load_settings(&root)?;
+        s.profile(&id).ok_or("这套配置已经不在了。")?;
+        s.active = Some(id);
+        project::save_settings(&root, &s)?;
+        storage_view(&root)
+    })
+    .await
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibrarySettingsInput {
+    name: Option<String>,
+    backup_dir: Option<String>,
+}
+
+/// What every profile shares: the project's name in image paths, and the originals' folder.
+#[tauri::command]
+pub async fn save_library_settings(ws: Ws<'_>, input: LibrarySettingsInput) -> Result<StorageView, String> {
+    let root = project_root(&ws)?;
+    blocking(move || {
+        let mut s = project::load_settings(&root)?;
+        s.name = input.name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
+        project::save_settings(&root, &s)?;
+        let backup = input.backup_dir.map(|d| d.trim().to_string()).filter(|d| !d.is_empty());
+        settings::update(|g| g.backup_dir = backup)?;
+        storage_view(&root)
+    })
+    .await
+}
+
+/// Asks a store about a missing object, with the form's values before they are saved: proves
+/// the bucket and keys work without writing. An empty secret uses the saved one.
+#[tauri::command]
+pub async fn check_storage(storage: Storage, access_key_id: Option<String>, access_key_secret: Option<String>) -> Result<(), String> {
+    storage.validate()?;
+    let id = access_key_id.map(|v| v.trim().to_string()).unwrap_or_default();
+    let secret = access_key_secret.map(|v| v.trim().to_string()).unwrap_or_default();
+    let creds = if !id.is_empty() && !secret.is_empty() {
+        keychain::Credentials { access_key_id: id, access_key_secret: secret }
+    } else {
+        let saved = keychain::load(&storage.credential_account())?.ok_or("填写 AccessKey ID 和 Secret 后再测试。")?;
+        if !id.is_empty() && saved.access_key_id != id {
+            return Err("换了 AccessKey ID，请同时填写对应的 Secret。".into());
+        }
+        saved
+    };
+    Store::open(&storage, &creds)?.check().await
 }
 
 fn today_and_now(blog: &Blog) -> (String, jiff::civil::DateTime) {
@@ -567,6 +689,10 @@ pub struct ImageView {
     check: Option<images::Check>,
     /// The original kept on this Mac, when it is still there.
     backup_path: Option<String>,
+    /// A small version for thumbnails (scaled by the store when it can), else the image.
+    thumb: String,
+    /// The profile whose store holds it; `None` when no profile does any more.
+    profile: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -577,9 +703,6 @@ pub struct LibraryView {
     unadopted: usize,
     /// Post titles by file, for showing where images are used.
     titles: BTreeMap<String, String>,
-    /// Query that makes the store send a small version, for thumbnails (Aliyun's image
-    /// processing); `None` when the store has none.
-    thumb_query: Option<String>,
 }
 
 /// The library with each image's pages, last check and kept original.
@@ -590,7 +713,7 @@ pub async fn image_library(ws: Ws<'_>) -> Result<LibraryView, String> {
         let s = project::load_settings(&blog.root)?;
         let catalog = project::load_catalog(&blog.root)?;
         let used = adopt::usages(&blog, &s)?;
-        let unadopted = if s.storage.is_some() { adopt::plan(&blog, &s, &[])?.len() } else { 0 };
+        let unadopted = if s.active_profile().is_some() { adopt::plan(&blog, &s, &[])?.len() } else { 0 };
         let checks: BTreeMap<String, images::Check> = project::load_checks(&blog.root);
         let backup_dir = settings::load().backup_dir();
         let titles = adopt::sources(&blog).into_iter().filter_map(|src| src.title.map(|t| (src.file, t))).collect();
@@ -599,7 +722,14 @@ pub async fn image_library(ws: Ws<'_>) -> Result<LibraryView, String> {
             .into_iter()
             .map(|image| {
                 let backup = backup_dir.join(&image.original.backup);
+                let profile = s.profile_for_url(&image.url);
+                let thumb = match profile.and_then(|p| p.storage.thumb_query()) {
+                    Some(q) => format!("{}{}{q}", image.url, if image.url.contains('?') { '&' } else { '?' }),
+                    None => image.url.clone(),
+                };
                 ImageView {
+                    thumb,
+                    profile: profile.map(|p| p.id.clone()),
                     used_by: used.get(&image.id).cloned().unwrap_or_default(),
                     check: checks.get(&image.id).cloned(),
                     backup_path: (!image.original.backup.is_empty() && backup.is_file()).then(|| backup.display().to_string()),
@@ -607,8 +737,7 @@ pub async fn image_library(ws: Ws<'_>) -> Result<LibraryView, String> {
                 }
             })
             .collect();
-        let thumb_query = matches!(s.storage, Some(Storage::AliyunOss { .. })).then(|| "x-oss-process=image/resize,w_480".to_string());
-        Ok(LibraryView { images, unadopted, titles, thumb_query })
+        Ok(LibraryView { images, unadopted, titles })
     })
     .await
 }
@@ -658,14 +787,22 @@ pub async fn delete_image(ws: Ws<'_>, id: String) -> Result<(), String> {
 pub async fn check_images(app: AppHandle, ws: Ws<'_>) -> Result<BTreeMap<String, images::Check>, String> {
     let blog = current_blog(&ws)?;
     let s = project::load_settings(&blog.root)?;
-    let store = images::open_store(&s)?;
     let catalog = project::load_catalog(&blog.root)?;
     let mut checks: BTreeMap<String, images::Check> = project::load_checks(&blog.root);
     let now = jiff::Timestamp::now().as_second();
     let total = catalog.images.len();
+    // Each image is checked in the store of its own profile; stores are opened once each.
+    let mut stores: BTreeMap<String, Result<Store, String>> = BTreeMap::new();
     for (i, img) in catalog.images.iter().enumerate() {
         let _ = app.emit("image-check-progress", (i, total));
-        checks.insert(img.id.clone(), images::check(&store, public_http(), img, now).await);
+        let check = match s.profile_for_url(&img.url) {
+            None => images::Check { at: now, ok: false, message: "没有哪套存储配置包含这张图的地址".into() },
+            Some(p) => match stores.entry(p.id.clone()).or_insert_with(|| images::open_store(&p.storage)) {
+                Ok(store) => images::check(store, public_http(), img, now).await,
+                Err(e) => images::Check { at: now, ok: false, message: e.clone() },
+            },
+        };
+        checks.insert(img.id.clone(), check);
     }
     let _ = app.emit("image-check-progress", (total, total));
     checks.retain(|id, _| catalog.get(id).is_some());

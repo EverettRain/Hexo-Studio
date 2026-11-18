@@ -97,8 +97,40 @@ impl Storage {
         }
     }
 
+    /// Every address form the store's objects may be written with: the public base, and for
+    /// Aliyun with a custom domain also the bucket's own domain.
+    pub fn bases(&self) -> Vec<String> {
+        let mut b = vec![self.public_base()];
+        if let Storage::AliyunOss { bucket, area, path, custom_url } = self {
+            if !custom_url.trim().is_empty() {
+                let bare = Storage::AliyunOss { bucket: bucket.clone(), area: area.clone(), path: path.clone(), custom_url: String::new() };
+                b.push(bare.public_base());
+            }
+        }
+        b
+    }
+
+    /// Whether `url` is one of this store's objects (under one of its bases).
+    pub fn serves(&self, url: &str) -> bool {
+        self.bases().iter().any(|b| !b.is_empty() && url.strip_prefix(b.as_str()).is_some_and(|rest| rest.starts_with('/')))
+    }
+
+    /// A query that makes the store send a small version, for thumbnails (Aliyun's image
+    /// processing); `None` when it cannot.
+    pub fn thumb_query(&self) -> Option<&'static str> {
+        matches!(self, Storage::AliyunOss { .. }).then_some("x-oss-process=image/resize,w_480")
+    }
+
     pub fn public_url(&self, key: &str) -> String {
         format!("{}/{}", self.public_base(), encode_key(key))
+    }
+
+    /// A name for a store set up before profiles had names: `阿里云 OSS · hexo-image-storage`.
+    pub fn label(&self) -> String {
+        match self {
+            Storage::AliyunOss { .. } => format!("阿里云 OSS · {}", self.bucket()),
+            Storage::S3 { .. } => format!("S3 · {}", self.bucket()),
+        }
     }
 
     /// Names the credentials in the keychain: one entry per store and bucket.
@@ -158,6 +190,34 @@ mod tests {
         // Act / Assert
         assert_eq!(s.endpoint(), "https://oss-cn-shanghai.aliyuncs.com");
         assert_eq!(s.public_url("EverettBlog/a/b.webp"), "https://hexo-image-storage.oss-cn-shanghai.aliyuncs.com/EverettBlog/a/b.webp");
+    }
+
+    #[test]
+    fn a_store_serves_addresses_under_its_domains_only() {
+        // Arrange
+        let with_domain = aliyun("img", "https://img.example.com/");
+
+        // Act / Assert
+        assert!(with_domain.serves("https://img.example.com/EverettBlog/a.webp"));
+        assert!(with_domain.serves("https://hexo-image-storage.oss-cn-shanghai.aliyuncs.com/a.webp"));
+        assert!(!with_domain.serves("https://img.example.com.evil.net/a.webp"));
+        assert!(!with_domain.serves("https://other.oss-cn-shanghai.aliyuncs.com/a.webp"));
+    }
+
+    #[test]
+    fn only_aliyun_scales_thumbnails() {
+        // Arrange
+        let s3 = Storage::S3 {
+            bucket: "b".into(),
+            endpoint: "https://s3.example".into(),
+            region: String::new(),
+            path: String::new(),
+            public_url: "https://cdn.example".into(),
+        };
+
+        // Act / Assert
+        assert!(aliyun("", "").thumb_query().is_some());
+        assert!(s3.thumb_query().is_none());
     }
 
     #[test]

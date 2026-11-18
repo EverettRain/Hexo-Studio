@@ -63,7 +63,7 @@ export function AdoptionDialog({ open, onClose }: { open: boolean; onClose: (cha
       onClose={close}
       title="接管旧图"
       className="max-w-[720px]"
-      description="把存储里还不在图片库的图（博客引用的、清单里列的）读出来：原图存到本机母图目录，转成 WebP 放到 <项目名>/<uid>.webp，记入图片库，再把博客里的地址换成新地址。旧对象不删除。"
+      description="针对当前存储配置的桶：把还不在图片库的图（博客引用的、清单里列的）读出来，原图存到本机母图目录，转成 WebP 放到 <项目名>/<uid>.webp，记入图片库，再把博客里的地址换成新地址。旧对象不删除。"
       footer={
         phase.kind === "plan" ? (
           <>

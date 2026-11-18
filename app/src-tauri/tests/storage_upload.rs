@@ -6,7 +6,7 @@ use hexo_studio_lib::domain::catalog::{ChecklistRow, Mirror};
 use hexo_studio_lib::domain::image_key::Format;
 use hexo_studio_lib::domain::storage::Storage;
 use hexo_studio_lib::infra::keychain::{self, Credentials};
-use hexo_studio_lib::infra::project::{self, ProjectSettings};
+use hexo_studio_lib::infra::project::{self, Profile, ProjectSettings, UploadSettings};
 use hexo_studio_lib::service::{adopt, images};
 use std::io::Cursor;
 use std::path::Path;
@@ -34,7 +34,8 @@ fn settings(endpoint: &str) -> ProjectSettings {
         public_url: format!("{endpoint}/hexo-studio-test"),
     };
     keychain::save(&storage.credential_account(), &Credentials { access_key_id: "test".into(), access_key_secret: "test".into() }).unwrap();
-    ProjectSettings { name: Some("EverettBlog".into()), storage: Some(storage), ..ProjectSettings::default() }
+    let profile = Profile { id: "moto".into(), name: "moto".into(), storage, upload: UploadSettings::default() };
+    ProjectSettings { name: Some("EverettBlog".into()), profiles: vec![profile], active: Some("moto".into()) }
 }
 
 fn incoming(bytes: Vec<u8>, name: Option<&str>, format: Format) -> images::Incoming {
@@ -65,7 +66,7 @@ async fn images_are_stored_once_by_uid_with_the_original_kept() {
     blog(&root);
     let backup = tempfile::tempdir().unwrap();
     let s = settings(&endpoint);
-    let prefix = s.storage.as_ref().unwrap().prefix();
+    let prefix = s.active_profile().unwrap().storage.prefix();
     let photo = jpeg(3000, 2000, 1);
 
     // Act
@@ -89,7 +90,7 @@ async fn images_are_stored_once_by_uid_with_the_original_kept() {
     assert_eq!((rec.width, rec.height), (2560, 1707));
 
     // Assert: the stored object is the WebP; the original sits by its uid in the backup folder.
-    let store = images::open_store(&s).unwrap();
+    let store = images::open_store(&s.active_profile().unwrap().storage).unwrap();
     let body = store.read(&first.image.key).await.unwrap();
     assert_eq!(image::guess_format(&body).unwrap(), image::ImageFormat::WebP);
     assert_eq!(std::fs::read(backup.path().join(format!("EverettBlog/{id}-IMG-1442.jpg"))).unwrap(), photo);
@@ -111,8 +112,8 @@ async fn adopting_takes_old_images_in_with_their_checklist_fields_and_rewrites_t
     blog(&root);
     let backup = tempfile::tempdir().unwrap();
     let s = settings(&endpoint);
-    let storage = s.storage.clone().unwrap();
-    let store = images::open_store(&s).unwrap();
+    let storage = s.active_profile().unwrap().storage.clone();
+    let store = images::open_store(&s.active_profile().unwrap().storage).unwrap();
     let run = jiff::Timestamp::now().as_nanosecond();
     let (photo, copy, avatar, unused) =
         (format!("IMG_{run}.JPG"), format!("copy-{run}.jpg"), format!("avatar-{run}.png"), format!("unused-{run}.png"));
@@ -200,4 +201,41 @@ async fn the_check_tells_a_missing_bucket_from_a_reachable_one() {
     // Assert
     assert!(gone.unwrap_err().contains("存储桶不存在"));
     assert_eq!(fine, Ok(()));
+}
+
+#[tokio::test(flavor = "current_thread")]
+async fn an_image_is_deleted_from_the_store_of_its_own_profile_after_switching() {
+    let Some(endpoint) = endpoint() else { return };
+    // Arrange: a second profile writes to another prefix and serves from another address, so
+    // the first image's address belongs to the first profile only.
+    let dir = tempfile::tempdir().unwrap();
+    let root = dir.path().join("blog");
+    blog(&root);
+    let backup = tempfile::tempdir().unwrap();
+    let mut s = settings(&endpoint);
+    let first = s.profiles[0].clone();
+    let Storage::S3 { bucket, region, path, .. } = first.storage.clone() else { unreachable!() };
+    let other = Storage::S3 {
+        bucket,
+        endpoint: endpoint.replace("127.0.0.1", "localhost"),
+        region,
+        path: format!("{path}other/"),
+        public_url: format!("{}/hexo-studio-test", endpoint.replace("127.0.0.1", "localhost")),
+    };
+    keychain::save(&other.credential_account(), &Credentials { access_key_id: "test".into(), access_key_secret: "test".into() }).unwrap();
+    let up = images::ingest(&root, &s, backup.path(), incoming(jpeg(60, 40, 7), Some("a.jpg"), Format::Webp)).await.unwrap();
+    s.profiles.push(Profile { id: "second".into(), name: "second".into(), storage: other, upload: UploadSettings::default() });
+    s.active = Some("second".into());
+    let later = images::ingest(&root, &s, backup.path(), incoming(jpeg(60, 40, 8), Some("b.jpg"), Format::Webp)).await.unwrap();
+
+    // Act
+    let owner = s.profile_for_url(&up.image.url).map(|p| p.id.clone());
+    images::delete(&root, &s, &up.image.id).await.unwrap();
+
+    // Assert: the new image went to the second profile; the old one was found and deleted in the first.
+    assert_eq!(owner.as_deref(), Some(first.id.as_str()));
+    assert!(later.image.key.contains("other/"));
+    assert_eq!(s.profile_for_url(&later.image.url).unwrap().id, "second");
+    let store = images::open_store(&first.storage).unwrap();
+    assert!(!store.exists(&up.image.key).await.unwrap());
 }
