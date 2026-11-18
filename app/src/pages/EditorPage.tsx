@@ -3,7 +3,7 @@ import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { AlertTriangle, ChevronLeft, ExternalLink, FolderSearch, PanelRightClose, PanelRightOpen, Search, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EditorToolbar } from "@/components/EditorToolbar";
-import { FrontMatterForm } from "@/components/FrontMatterForm";
+import { FrontMatterBar, FrontMatterPanel } from "@/components/FrontMatterForm";
 import { MarkdownEditor, type EditorHandle } from "@/components/MarkdownEditor";
 import { PreviewPane } from "@/components/PreviewPane";
 import { Button } from "@/components/ui/button";
@@ -41,15 +41,6 @@ const pastedName = (f: File) => (/^image\.\w+$/i.test(f.name) ? "" : f.name);
 /** Typing stops this long before the post is saved (and the preview refreshed). */
 const AUTOSAVE_MS = 1000;
 const PREVIEW_WIDTH_KEY = "hexo-studio.preview-width";
-const META_OPEN_KEY = "hexo-studio.meta-open";
-
-function readMetaOpen(): boolean {
-  try {
-    return localStorage.getItem(META_OPEN_KEY) === "1";
-  } catch {
-    return false;
-  }
-}
 
 function readWidth(): number {
   try {
@@ -84,18 +75,10 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
   const [uploading, setUploading] = useState(0);
   const [dropping, setDropping] = useState(false);
   const [picking, setPicking] = useState(false);
-  const [metaOpen, setMetaOpen] = useState(readMetaOpen);
+  const [metaOpen, setMetaOpen] = useState(false);
   const [fmt, setFmt] = useState<FormatState | null>(null);
   const words = useMemo(() => wordCount(body), [body]);
-
-  const toggleMeta = (open: boolean) => {
-    setMetaOpen(open);
-    try {
-      localStorage.setItem(META_OPEN_KEY, open ? "1" : "0");
-    } catch {
-      /* storage unavailable */
-    }
-  };
+  const closeMeta = useCallback(() => setMetaOpen(false), []);
 
   // Read again whenever the page is shown: the store may have been set up in settings meanwhile.
   useEffect(() => {
@@ -466,39 +449,45 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
             onImageFormat={setFormat}
             uploading={uploading}
           />
-          <div className={cn("shrink-0 border-b-[0.5px] border-line-2 px-4", metaOpen && "max-h-[55%] overflow-y-auto")}>
-            <FrontMatterForm
-              yaml={yaml}
-              onChange={setYaml}
-              onError={(m) => toast(m, "error")}
-              timezone={config.timezone}
-              tagSuggestions={suggestions.tags}
-              categorySuggestions={suggestions.categories}
-              open={metaOpen}
-              onOpenChange={toggleMeta}
-            />
-          </div>
-          {/* Absolute, so CodeMirror gets a definite height to scroll in rather than growing past the status bar. */}
-          <div className="relative min-h-0 flex-1">
-            <div className="absolute inset-0">
-              <MarkdownEditor
-              handle={editor}
-              value={body}
-              onChange={setBody}
-              onSave={() => void save()}
-              onFormat={setFmt}
-              onPasteImages={(files) => void uploadImages(files.map((f) => ({ label: f.name || "截图", run: () => api.uploadImageBytes(id, f, pastedName(f), format) })))}
-              />
+          <div className="relative flex min-h-0 flex-1 flex-col">
+            <div className="shrink-0 border-b-[0.5px] border-line-2">
+              <FrontMatterBar yaml={yaml} open={metaOpen} onOpenChange={setMetaOpen} />
             </div>
-          </div>
-          <div className="flex h-6 shrink-0 items-center gap-3 border-t-[0.5px] border-line-2 px-4 text-[11px] tabular-nums text-muted">
-            {fmt && (
-              <span>
-                第 {fmt.line} 行，第 {fmt.column} 列
-              </span>
+            {/* Absolute, so CodeMirror gets a definite height to scroll in rather than growing past the status bar. */}
+            <div className="relative min-h-0 flex-1">
+              <div className="absolute inset-0">
+                <MarkdownEditor
+                  handle={editor}
+                  value={body}
+                  onChange={setBody}
+                  onSave={() => void save()}
+                  onFormat={setFmt}
+                  onPasteImages={(files) => void uploadImages(files.map((f) => ({ label: f.name || "截图", run: () => api.uploadImageBytes(id, f, pastedName(f), format) })))}
+                />
+              </div>
+            </div>
+            <div className="flex h-6 shrink-0 items-center gap-3 border-t-[0.5px] border-line-2 px-4 text-[11px] tabular-nums text-muted">
+              {fmt && (
+                <span>
+                  第 {fmt.line} 行，第 {fmt.column} 列
+                </span>
+              )}
+              <span className="flex-1" />
+              <span title="中日韩文字按字、其他文字按词计，不含代码块、图片、链接地址和标签插件">{words.toLocaleString()} 字</span>
+            </div>
+            {/* Over the body only: the preview beside it shows each change as it is saved. */}
+            {metaOpen && (
+              <FrontMatterPanel
+                className="absolute inset-x-0 bottom-0 top-9"
+                yaml={yaml}
+                onChange={setYaml}
+                onError={(m) => toast(m, "error")}
+                timezone={config.timezone}
+                tagSuggestions={suggestions.tags}
+                categorySuggestions={suggestions.categories}
+                onClose={closeMeta}
+              />
             )}
-            <span className="flex-1" />
-            <span title="中日韩文字按字、其他文字按词计，不含代码块、图片、链接地址和标签插件">{words.toLocaleString()} 字</span>
           </div>
         </div>
         {showPreview && (
