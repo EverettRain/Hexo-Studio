@@ -1,4 +1,4 @@
-import { ChevronsUpDown, FileText, Moon, Rocket, Settings, Sun, SunMoon } from "lucide-react";
+import { ChevronsUpDown, FileText, Images, Moon, Rocket, Settings, Sun, SunMoon } from "lucide-react";
 import type React from "react";
 import { useLayoutEffect, useRef, useState } from "react";
 import appIcon from "@/assets/app-icon.png";
@@ -6,7 +6,7 @@ import type { PreviewState } from "@/lib/api";
 import type { ThemeMode } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
-export type PageId = "posts" | "deploy" | "settings";
+export type PageId = "posts" | "images" | "deploy" | "settings";
 
 type Icon = React.ComponentType<{ className?: string }>;
 interface NavItem {
@@ -17,6 +17,7 @@ interface NavItem {
 
 const main: NavItem[] = [
   { id: "posts", label: "文章", icon: FileText },
+  { id: "images", label: "图片", icon: Images },
   { id: "deploy", label: "部署", icon: Rocket },
 ];
 const footer: NavItem[] = [{ id: "settings", label: "设置", icon: Settings }];

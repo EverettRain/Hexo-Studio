@@ -174,9 +174,10 @@ fn new_and_publish_report_the_post_they_made() {
     assert!(text.contains("title: Hexo Studio 测试草稿") && text.contains("date: "), "{text}");
 }
 
-/// Plans (does not run) the move of the blog's real images; reads nothing from the store.
+/// Plans (does not run) adopting the blog's real images, with the user's checklist when
+/// `HEXO_STUDIO_TEST_CHECKLIST` names it; reads nothing from the store.
 #[test]
-fn migration_plan_covers_every_image_of_the_bucket() {
+fn adoption_covers_every_image_of_the_bucket_in_the_blog_and_the_checklist() {
     let Some(dir) = blog_dir() else { return };
     // Arrange
     let b = blog::open(&dir).unwrap();
@@ -188,17 +189,23 @@ fn migration_plan_covers_every_image_of_the_bucket() {
     };
     let settings =
         hexo_studio_lib::infra::project::ProjectSettings { name: Some("EverettBlog".into()), storage: Some(storage), ..Default::default() };
+    let rows = std::env::var("HEXO_STUDIO_TEST_CHECKLIST")
+        .ok()
+        .map(|p| hexo_studio_lib::domain::catalog::parse_checklist(&std::fs::read_to_string(p).unwrap()).unwrap())
+        .unwrap_or_default();
 
     // Act
-    let moves = hexo_studio_lib::service::migration::plan(&b, &settings).unwrap();
+    let plan = hexo_studio_lib::service::adopt::plan(&b, &settings, &rows).unwrap();
 
-    // Assert: as many images as distinct bucket addresses a plain search finds.
+    // Assert: as many images as distinct bucket addresses a plain search finds, plus the
+    // checklist's; every checklist row lands on a candidate.
+    let host = "hexo-image-storage.oss-cn-shanghai.aliyuncs.com/";
+    let key_of = |part: &str| -> String { part.chars().take_while(|c| !c.is_whitespace() && !"()\"'<>[]{},|`?#".contains(*c)).collect() };
     let mut distinct = std::collections::BTreeSet::new();
     let mut search = |p: &std::path::Path| {
         let text = std::fs::read_to_string(p).unwrap_or_default();
-        for part in text.split("hexo-image-storage.oss-cn-shanghai.aliyuncs.com/").skip(1) {
-            let key: String = part.chars().take_while(|c| !c.is_whitespace() && !"()\"'<>[]{},|`?#".contains(*c)).collect();
-            distinct.insert(key);
+        for part in text.split(host).skip(1) {
+            distinct.insert(key_of(part));
         }
     };
     fn walk(d: &std::path::Path, f: &mut dyn FnMut(&std::path::Path)) {
@@ -218,9 +225,20 @@ fn migration_plan_covers_every_image_of_the_bucket() {
             search(&e.path());
         }
     }
-    for m in moves.iter().take(8) {
-        println!("{} -> {}  ({})", m.old_key, m.new_key, m.files.join(", "));
+    let in_blog = distinct.len();
+    for r in &rows {
+        if let Some(part) = r.url.split(host).nth(1) {
+            distinct.insert(key_of(part));
+        }
     }
-    println!("… {} images", moves.len());
-    assert_eq!(moves.len(), distinct.len(), "{distinct:?}");
+    let with_row = plan.iter().filter(|c| c.row.is_some()).count();
+    println!(
+        "{} images: {} in the blog, {} more only in the checklist; {} with checklist fields",
+        plan.len(),
+        in_blog,
+        distinct.len() - in_blog,
+        with_row
+    );
+    assert_eq!(plan.len(), distinct.len());
+    assert_eq!(with_row, rows.len());
 }

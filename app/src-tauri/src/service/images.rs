@@ -1,34 +1,14 @@
-//! Uploading an image for a post: keep the original on this Mac, convert it (WebP by default),
-//! put it at `<prefix><project>/<page>/<name>` in the project's store.
+//! The project's image library: taking an image in (keep the original, convert, upload to
+//! `<prefix><project>/<uid>.<ext>`, record it), checking, removing.
 
+use crate::domain::catalog::{Image, Original};
 use crate::domain::image_key::{self, Format};
 use crate::infra::image_encode;
 use crate::infra::keychain;
 use crate::infra::project::{self, ProjectSettings};
 use crate::infra::store::Store;
-use serde::Serialize;
-use std::path::{Path, PathBuf};
-
-pub struct Upload {
-    /// The post's path under `_posts` / `_drafts` without `.md`, e.g. `pointer-security`.
-    pub page: String,
-    /// The file's own name; `None` for a pasted screenshot.
-    pub file_name: Option<String>,
-    pub bytes: Vec<u8>,
-    pub format: Format,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct Uploaded {
-    pub url: String,
-    pub key: String,
-    /// Where the original was kept.
-    pub backup: String,
-    pub format: Format,
-    pub original_bytes: usize,
-    pub uploaded_bytes: usize,
-}
+use serde::{Deserialize, Serialize};
+use std::path::Path;
 
 /// The store a project uploads to, with its credentials from the keychain.
 pub fn open_store(settings: &ProjectSettings) -> Result<Store, String> {
@@ -42,111 +22,149 @@ fn sniffed_ext(bytes: &[u8]) -> String {
     image::guess_format(bytes).ok().and_then(|f| f.extensions_str().first().copied()).unwrap_or("png").to_string()
 }
 
-/// `<backup>/<project>/<page…>`, the folder an image's original is kept in.
-pub fn backup_folder(backup_dir: &Path, project: &str, page: &str) -> PathBuf {
-    page.split('/').filter(|p| !p.is_empty()).map(image_key::segment).fold(backup_dir.join(image_key::segment(project)), |d, p| d.join(p))
-}
-
-/// Copies the original into `<backup>/<project>/<page>/`; a different file of the same name
-/// already there gets a numbered name, the same file is not copied twice.
-pub fn keep_original(dir: &Path, stem: &str, ext: &str, bytes: &[u8]) -> Result<PathBuf, String> {
-    std::fs::create_dir_all(dir).map_err(|e| format!("无法创建母图目录 {}：{e}", dir.display()))?;
-    let name = if ext.is_empty() { image_key::segment(stem) } else { format!("{}.{ext}", image_key::segment(stem)) };
-    let first = dir.join(&name);
-    let mut path = first.clone();
-    let mut n = 1;
-    loop {
-        match std::fs::read(&path) {
-            Ok(existing) if existing == bytes => return Ok(path),
-            Ok(_) => {
-                n += 1;
-                path = dir.join(image_key::numbered(&name, n));
-            }
-            Err(_) => break,
-        }
-    }
-    std::fs::write(&path, bytes).map_err(|e| format!("无法保存母图 {}：{e}", path.display()))?;
-    Ok(path)
-}
-
-/// The bytes to upload and their extension: WebP (off the async threads, it takes a while for a
-/// large photo) or the original.
-pub async fn convert(bytes: Vec<u8>, ext: &str, format: Format, settings: &ProjectSettings) -> Result<(Vec<u8>, String), String> {
+/// The bytes to upload, their extension and pixel size: WebP (off the async threads, it takes
+/// a while for a large photo) or the original.
+async fn convert(bytes: Vec<u8>, ext: &str, format: Format, settings: &ProjectSettings) -> Result<(Vec<u8>, String, u32, u32), String> {
     match format {
         Format::Webp => {
             let (quality, max_edge) = (settings.upload.quality, settings.upload.max_edge);
             let ext2 = ext.to_string();
-            let encoded = tokio::task::spawn_blocking(move || image_encode::to_webp(&bytes, &ext2, quality, max_edge))
+            let e = tokio::task::spawn_blocking(move || image_encode::to_webp(&bytes, &ext2, quality, max_edge))
                 .await
                 .map_err(|e| e.to_string())??;
-            Ok((encoded.bytes, "webp".to_string()))
+            Ok((e.bytes, "webp".to_string(), e.width, e.height))
         }
-        Format::Original => Ok((bytes, ext.to_string())),
+        Format::Original => {
+            let (w, h) = image::ImageReader::new(std::io::Cursor::new(&bytes))
+                .with_guessed_format()
+                .ok()
+                .and_then(|r| r.into_dimensions().ok())
+                .unwrap_or((0, 0));
+            Ok((bytes, ext.to_string(), w, h))
+        }
     }
 }
 
-/// Puts the object at `wanted`, or at `wanted-2`, `-3`, … when that is taken; returns the key.
-pub async fn put_free(store: &Store, wanted: &str, body: Vec<u8>, ext: &str) -> Result<String, String> {
-    let mut key = wanted.to_string();
-    let mut n = 1;
-    while store.exists(&key).await? {
-        n += 1;
-        key = image_key::numbered(wanted, n);
-    }
-    store.put(&key, body, image_key::content_type(ext)).await?;
-    Ok(key)
+/// An image to take into the library.
+pub struct Incoming {
+    pub bytes: Vec<u8>,
+    /// The file's own name; `None` for a pasted screenshot.
+    pub file_name: Option<String>,
+    pub format: Format,
+    pub name: Option<String>,
+    pub description: String,
+    /// `YYYY-MM-DD`, in the blog's zone.
+    pub today: String,
+    pub legacy_urls: Vec<String>,
+    /// `now` for naming a screenshot.
+    pub now: jiff::civil::DateTime,
 }
 
-pub async fn upload(
-    root: &Path,
-    settings: &ProjectSettings,
-    backup_dir: &Path,
-    req: Upload,
-    now: jiff::civil::DateTime,
-) -> Result<Uploaded, String> {
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Ingested {
+    pub image: Image,
+    /// It was in the library already (same content): nothing was uploaded.
+    pub existed: bool,
+    pub original_bytes: usize,
+}
+
+/// Takes an image in: same content already in the library → that record; otherwise the original
+/// is kept in `<backup>/<project>/<uid>-<name>` (before anything is uploaded), converted, put at
+/// `<prefix><project>/<uid>.<ext>` and recorded in `images.json`.
+pub async fn ingest(root: &Path, settings: &ProjectSettings, backup_dir: &Path, inc: Incoming) -> Result<Ingested, String> {
     let storage = settings.storage.clone().ok_or("还没有设置图片存储（设置 → 图片存储）。")?;
+    let id = image_key::content_id(&inc.bytes);
+    let original_bytes = inc.bytes.len();
+    if let Some(found) = project::load_catalog(root)?.get(&id).cloned() {
+        return Ok(Ingested { image: found, existed: true, original_bytes });
+    }
     let store = open_store(settings)?;
-    let project = project::project_name(root, settings);
-    let (stem, ext) = match &req.file_name {
-        Some(name) => {
-            let (stem, ext) = image_key::split_name(name);
-            (stem.to_string(), if ext.is_empty() { sniffed_ext(&req.bytes) } else { ext })
-        }
-        None => (image_key::screenshot_stem(now), sniffed_ext(&req.bytes)),
+    let project_name = project::project_name(root, settings);
+    let file_name = match &inc.file_name {
+        Some(n) if !image_key::split_name(n).1.is_empty() => n.clone(),
+        Some(n) => format!("{n}.{}", sniffed_ext(&inc.bytes)),
+        None => format!("{}.{}", image_key::screenshot_stem(inc.now), sniffed_ext(&inc.bytes)),
     };
+    let (stem, ext) = image_key::split_name(&file_name);
+    let stem = stem.to_string();
 
-    // The original is safe on this Mac before anything goes to the store.
-    let backup = keep_original(&backup_folder(backup_dir, &project, &req.page), &stem, &ext, &req.bytes)?;
+    let backup_rel = format!("{}/{}", image_key::segment(&project_name), image_key::backup_name(&id, &file_name));
+    let backup = backup_dir.join(&backup_rel);
+    if let Some(dir) = backup.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| format!("无法创建母图目录 {}：{e}", dir.display()))?;
+    }
+    if std::fs::read(&backup).map(|b| b != inc.bytes).unwrap_or(true) {
+        std::fs::write(&backup, &inc.bytes).map_err(|e| format!("无法保存母图 {}：{e}", backup.display()))?;
+    }
 
-    let format = image_key::output_format(&ext, req.format);
-    let original_bytes = req.bytes.len();
-    let (body, out_ext) = convert(req.bytes, &ext, format, settings).await?;
-    let wanted = image_key::object_key(&storage.prefix(), &project, &req.page, &stem, &out_ext);
-    let uploaded_bytes = body.len();
-    let key = put_free(&store, &wanted, body, &out_ext).await?;
-    Ok(Uploaded { url: storage.public_url(&key), key, backup: backup.display().to_string(), format, original_bytes, uploaded_bytes })
+    let format = image_key::output_format(&ext, inc.format);
+    let (body, out_ext, width, height) = convert(inc.bytes, &ext, format, settings).await?;
+    let key = image_key::object_key(&storage.prefix(), &project_name, &id, &out_ext);
+    let bytes = body.len() as u64;
+    store.put(&key, body, image_key::content_type(&out_ext)).await?;
+    let image = Image {
+        id: id.clone(),
+        name: inc.name.filter(|n| !n.trim().is_empty()).unwrap_or(stem),
+        description: inc.description,
+        ok: None,
+        url: storage.public_url(&key),
+        key,
+        uploaded_at: inc.today,
+        mirrors: Vec::new(),
+        format,
+        bytes,
+        width,
+        height,
+        original: Original { file_name, bytes: original_bytes as u64, backup: backup_rel },
+        legacy_urls: inc.legacy_urls,
+    };
+    // Added at once, by another upload of the same picture: keep that record.
+    let recorded = project::update_catalog(root, |c| {
+        c.add(image.clone());
+        Ok(c.get(&id).cloned().expect("just added or already there"))
+    })?;
+    Ok(Ingested { image: recorded, existed: false, original_bytes })
+}
+
+/// The last check of an image on this Mac.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Check {
+    /// Unix seconds.
+    pub at: i64,
+    pub ok: bool,
+    /// What is wrong, when not ok.
+    pub message: String,
+}
+
+/// Checks the object is in the store and its public address serves it.
+pub async fn check(store: &Store, http: &reqwest::Client, image: &Image, now: i64) -> Check {
+    let fail = |message: String| Check { at: now, ok: false, message };
+    match store.exists(&image.key).await {
+        Ok(true) => {}
+        Ok(false) => return fail("存储里没有这个对象".into()),
+        Err(e) => return fail(e),
+    }
+    // A one-byte GET, as a browser fetches the image; some hosts answer HEAD differently.
+    match http.get(&image.url).header("Range", "bytes=0-0").send().await {
+        Ok(r) if r.status().is_success() => Check { at: now, ok: true, message: String::new() },
+        Ok(r) => fail(format!("公开地址返回 HTTP {}", r.status().as_u16())),
+        Err(e) => fail(format!("公开地址无法访问：{e}")),
+    }
+}
+
+/// Removes an image from the store and the library; its kept original stays on this Mac.
+pub async fn delete(root: &Path, settings: &ProjectSettings, id: &str) -> Result<(), String> {
+    let image = project::load_catalog(root)?.get(id).cloned().ok_or("图片库里没有这张图。")?;
+    open_store(settings)?.delete(&image.key).await?;
+    project::update_catalog(root, |c| Ok(c.remove(id).map(|_| ())))?;
+    Ok(())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn the_same_original_is_kept_once_and_a_different_one_gets_a_number() {
-        // Arrange
-        let dir = tempfile::tempdir().unwrap();
-
-        // Act
-        let a = keep_original(dir.path(), "photo", "jpg", b"one").unwrap();
-        let again = keep_original(dir.path(), "photo", "jpg", b"one").unwrap();
-        let other = keep_original(dir.path(), "photo", "jpg", b"two").unwrap();
-
-        // Assert
-        assert_eq!(a, again);
-        assert_eq!(other, dir.path().join("photo-2.jpg"));
-        assert_eq!(std::fs::read(&a).unwrap(), b"one");
-        assert_eq!(std::fs::read(&other).unwrap(), b"two");
-    }
 
     #[test]
     fn a_pasted_image_is_named_by_its_content() {

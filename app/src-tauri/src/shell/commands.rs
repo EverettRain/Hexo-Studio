@@ -1,19 +1,21 @@
 //! Tauri commands the interface calls.
 
+use crate::domain::catalog::{self, ChecklistRow, Image, Mirror};
 use crate::domain::config::Deployer;
 use crate::domain::image_key::Format;
+use crate::domain::permalink;
 use crate::domain::storage::Storage;
 use crate::domain::task::Task;
-use crate::domain::{permalink, post};
 use crate::infra::blog::{self, Blog, PostFile, PostSummary, WriteOutcome};
 use crate::infra::node_env::{self, NodeEnv};
 use crate::infra::project::UploadSettings;
 use crate::infra::{git, keychain, paths, project, settings};
-use crate::service::images::{self, Uploaded};
-use crate::service::migration;
+use crate::service::adopt;
+use crate::service::images;
 use crate::service::preview::{self, LogLine, PageProbe, Preview, PreviewState};
 use crate::service::runner::{Run as RunRecord, Runner};
 use serde::Serialize;
+use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -499,65 +501,285 @@ pub async fn check_storage(ws: Ws<'_>) -> Result<(), String> {
     images::open_store(&s)?.check().await
 }
 
-async fn upload_for(ws: &Workspace, post_id: &str, file_name: Option<String>, bytes: Vec<u8>, format: Format) -> Result<Uploaded, String> {
-    let blog = current_blog(ws)?;
-    let (_, _, file) = blog.post_path(post_id)?;
-    let root = blog.root.clone();
-    let s = project::load_settings(&root)?;
-    let tz = permalink::blog_zone(blog.config.timezone.as_deref());
-    let now = jiff::Timestamp::now().to_zoned_datetime(tz).datetime();
-    let req = images::Upload { page: post::slug(&file), file_name, bytes, format };
-    images::upload(&root, &s, &settings::load().backup_dir(), req, now).await
+fn today_and_now(blog: &Blog) -> (String, jiff::civil::DateTime) {
+    let now = jiff::Timestamp::now().to_zoned_datetime(permalink::blog_zone(blog.config.timezone.as_deref())).datetime();
+    (now.date().to_string(), now)
 }
 
-/// Uploads a file from disk (dropped on the editor or chosen in a dialog).
+/// Takes an image into the library. From a post (`post_id`), its default description names the
+/// post, and the caller inserts its address there.
+async fn ingest_for(
+    ws: &Workspace,
+    post_id: Option<&str>,
+    file_name: Option<String>,
+    bytes: Vec<u8>,
+    format: Format,
+) -> Result<images::Ingested, String> {
+    let blog = current_blog(ws)?;
+    let description = match post_id {
+        Some(id) => {
+            let title = blog.read_post(id).ok().and_then(|f| f.summary.title).unwrap_or_else(|| id.to_string());
+            format!("{title} 内图")
+        }
+        None => String::new(),
+    };
+    let s = project::load_settings(&blog.root)?;
+    let (today, now) = today_and_now(&blog);
+    let inc = images::Incoming { bytes, file_name, format, name: None, description, today, legacy_urls: Vec::new(), now };
+    images::ingest(&blog.root, &s, &settings::load().backup_dir(), inc).await
+}
+
+/// Takes a file from disk into the library (dropped on the editor, chosen in a dialog, or
+/// added on the image page).
 #[tauri::command]
-pub async fn upload_image_file(ws: Ws<'_>, post_id: String, path: String, format: Format) -> Result<Uploaded, String> {
+pub async fn upload_image_file(ws: Ws<'_>, post_id: Option<String>, path: String, format: Format) -> Result<images::Ingested, String> {
     let file = PathBuf::from(&path);
     let name = file.file_name().map(|n| n.to_string_lossy().into_owned());
     let bytes = blocking(move || std::fs::read(&file).map_err(|e| format!("无法读取 {path}：{e}"))).await?;
-    upload_for(&ws, &post_id, name, bytes, format).await
+    ingest_for(&ws, post_id.as_deref(), name, bytes, format).await
 }
 
-/// Uploads pasted image bytes, sent as the raw request body; the post, an optional file name
-/// and the format come in headers (`x-post`, `x-name`, percent-encoded; `x-format`).
+/// Takes pasted image bytes into the library, sent as the raw request body; the post, an
+/// optional file name and the format come in headers (`x-post`, `x-name`, percent-encoded;
+/// `x-format`).
 #[tauri::command]
-pub async fn upload_image_bytes(ws: Ws<'_>, request: tauri::ipc::Request<'_>) -> Result<Uploaded, String> {
+pub async fn upload_image_bytes(ws: Ws<'_>, request: tauri::ipc::Request<'_>) -> Result<images::Ingested, String> {
     let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("没有收到图片数据。".into()) };
     let header = |name: &str| -> Option<String> {
         let raw = request.headers().get(name)?.to_str().ok()?;
         Some(url::form_urlencoded::parse(format!("v={raw}").as_bytes()).next()?.1.into_owned())
     };
-    let post_id = header("x-post").ok_or("缺少文章。")?;
     let format = match header("x-format").as_deref() {
         Some("original") => Format::Original,
         _ => Format::Webp,
     };
-    upload_for(&ws, &post_id, header("x-name").filter(|n| !n.is_empty()), bytes.clone(), format).await
+    let post = header("x-post").filter(|p| !p.is_empty());
+    ingest_for(&ws, post.as_deref(), header("x-name").filter(|n| !n.is_empty()), bytes.clone(), format).await
 }
 
-/// What migrating the old images would do; nothing is changed.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImageView {
+    #[serde(flatten)]
+    image: Image,
+    /// Files that use it, from the blog root.
+    used_by: Vec<String>,
+    check: Option<images::Check>,
+    /// The original kept on this Mac, when it is still there.
+    backup_path: Option<String>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct LibraryView {
+    images: Vec<ImageView>,
+    /// Images of the store the blog uses that are not in the library yet.
+    unadopted: usize,
+    /// Post titles by file, for showing where images are used.
+    titles: BTreeMap<String, String>,
+    /// Query that makes the store send a small version, for thumbnails (Aliyun's image
+    /// processing); `None` when the store has none.
+    thumb_query: Option<String>,
+}
+
+/// The library with each image's pages, last check and kept original.
 #[tauri::command]
-pub async fn migration_plan(ws: Ws<'_>) -> Result<Vec<migration::PlannedMove>, String> {
+pub async fn image_library(ws: Ws<'_>) -> Result<LibraryView, String> {
     let blog = current_blog(&ws)?;
     blocking(move || {
         let s = project::load_settings(&blog.root)?;
-        Ok(migration::plan(&blog, &s)?.iter().map(migration::view).collect())
+        let catalog = project::load_catalog(&blog.root)?;
+        let used = adopt::usages(&blog, &s)?;
+        let unadopted = if s.storage.is_some() { adopt::plan(&blog, &s, &[])?.len() } else { 0 };
+        let checks: BTreeMap<String, images::Check> = project::load_checks(&blog.root);
+        let backup_dir = settings::load().backup_dir();
+        let titles = adopt::sources(&blog).into_iter().filter_map(|src| src.title.map(|t| (src.file, t))).collect();
+        let images = catalog
+            .images
+            .into_iter()
+            .map(|image| {
+                let backup = backup_dir.join(&image.original.backup);
+                ImageView {
+                    used_by: used.get(&image.id).cloned().unwrap_or_default(),
+                    check: checks.get(&image.id).cloned(),
+                    backup_path: (!image.original.backup.is_empty() && backup.is_file()).then(|| backup.display().to_string()),
+                    image,
+                }
+            })
+            .collect();
+        let thumb_query = matches!(s.storage, Some(Storage::AliyunOss { .. })).then(|| "x-oss-process=image/resize,w_480".to_string());
+        Ok(LibraryView { images, unadopted, titles, thumb_query })
     })
     .await
 }
 
-/// Migrates the old images (as `migration_plan` lists them); progress arrives as
-/// `migration-progress` events.
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImagePatch {
+    name: String,
+    description: String,
+    ok: Option<bool>,
+    mirrors: Vec<Mirror>,
+}
+
+/// Changes the hand-kept fields of an image.
 #[tauri::command]
-pub async fn run_migration(app: AppHandle, ws: Ws<'_>, runner: Run<'_>) -> Result<migration::Report, String> {
-    if runner.busy() {
-        return Err("还有命令在执行，结束后再迁移。".into());
-    }
+pub async fn update_image(ws: Ws<'_>, id: String, patch: ImagePatch) -> Result<Image, String> {
+    let root = project_root(&ws)?;
+    blocking(move || {
+        project::update_catalog(&root, |c| {
+            let img = c.get_mut(&id).ok_or("图片库里没有这张图。")?;
+            img.name = patch.name.trim().to_string();
+            img.description = patch.description.trim().to_string();
+            img.ok = patch.ok;
+            img.mirrors = patch.mirrors.into_iter().filter(|m| !m.url.trim().is_empty()).collect();
+            Ok(img.clone())
+        })
+    })
+    .await
+}
+
+/// Deletes an image no page uses: the object and the record; the original stays on this Mac.
+#[tauri::command]
+pub async fn delete_image(ws: Ws<'_>, id: String) -> Result<(), String> {
     let blog = current_blog(&ws)?;
     let s = project::load_settings(&blog.root)?;
-    migration::run(&blog, &s, &settings::load().backup_dir(), |p| {
-        let _ = app.emit("migration-progress", p);
+    let (blog2, s2, id2) = (blog.clone(), s.clone(), id.clone());
+    let used = blocking(move || Ok(adopt::usages(&blog2, &s2)?.remove(&id2).unwrap_or_default())).await?;
+    if !used.is_empty() {
+        return Err(format!("这张图还在 {} 个文件里使用，不能删除：{}", used.len(), used.join("、")));
+    }
+    images::delete(&blog.root, &s, &id).await
+}
+
+/// Checks every image (object in the store, public address answers); results are kept on this
+/// Mac and progress arrives as `image-check-progress` events.
+#[tauri::command]
+pub async fn check_images(app: AppHandle, ws: Ws<'_>) -> Result<BTreeMap<String, images::Check>, String> {
+    let blog = current_blog(&ws)?;
+    let s = project::load_settings(&blog.root)?;
+    let store = images::open_store(&s)?;
+    let catalog = project::load_catalog(&blog.root)?;
+    let mut checks: BTreeMap<String, images::Check> = project::load_checks(&blog.root);
+    let now = jiff::Timestamp::now().as_second();
+    let total = catalog.images.len();
+    for (i, img) in catalog.images.iter().enumerate() {
+        let _ = app.emit("image-check-progress", (i, total));
+        checks.insert(img.id.clone(), images::check(&store, public_http(), img, now).await);
+    }
+    let _ = app.emit("image-check-progress", (total, total));
+    checks.retain(|id, _| catalog.get(id).is_some());
+    project::save_checks(&blog.root, &checks)?;
+    Ok(checks)
+}
+
+/// Reaches public image addresses (unlike `http()`, through the system's usual network path).
+fn public_http() -> &'static reqwest::Client {
+    static CLIENT: std::sync::OnceLock<reqwest::Client> = std::sync::OnceLock::new();
+    CLIENT.get_or_init(|| reqwest::Client::builder().timeout(Duration::from_secs(20)).build().expect("HTTP client"))
+}
+
+#[tauri::command]
+pub fn reveal_path(app: AppHandle, path: String) -> Result<(), String> {
+    app.opener().reveal_item_in_dir(path).map_err(|e| e.to_string())
+}
+
+fn read_checklist(path: Option<String>) -> Result<Vec<ChecklistRow>, String> {
+    match path {
+        Some(p) => catalog::parse_checklist(&std::fs::read_to_string(&p).map_err(|e| format!("无法读取清单 {p}：{e}"))?),
+        None => Ok(Vec::new()),
+    }
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CandidateView {
+    old_key: String,
+    old_url: String,
+    files: Vec<String>,
+    /// The checklist's name for it, when a checklist was given.
+    name: Option<String>,
+    description: Option<String>,
+}
+
+/// What adopting would take in; nothing changes. With a checklist CSV, its rows join the list.
+#[tauri::command]
+pub async fn adoption_plan(ws: Ws<'_>, checklist: Option<String>) -> Result<Vec<CandidateView>, String> {
+    let blog = current_blog(&ws)?;
+    blocking(move || {
+        let rows = read_checklist(checklist)?;
+        let s = project::load_settings(&blog.root)?;
+        Ok(adopt::plan(&blog, &s, &rows)?
+            .into_iter()
+            .map(|c| CandidateView {
+                old_url: c.old_urls[0].clone(),
+                name: c.row.as_ref().map(|r| r.name.clone()),
+                description: c.row.as_ref().map(|r| r.description.clone()),
+                old_key: c.old_key,
+                files: c.files,
+            })
+            .collect())
+    })
+    .await
+}
+
+/// Adopts the store's images into the library; progress arrives as `adoption-progress`.
+#[tauri::command]
+pub async fn run_adoption(app: AppHandle, ws: Ws<'_>, runner: Run<'_>, checklist: Option<String>) -> Result<adopt::Report, String> {
+    if runner.busy() {
+        return Err("还有命令在执行，结束后再接管。".into());
+    }
+    let blog = current_blog(&ws)?;
+    let rows = read_checklist(checklist)?;
+    let s = project::load_settings(&blog.root)?;
+    let (today, now) = today_and_now(&blog);
+    adopt::run(&blog, &s, &settings::load().backup_dir(), &rows, &today, now, |p| {
+        let _ = app.emit("adoption-progress", p);
+    })
+    .await
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ImportReport {
+    updated: usize,
+    /// Checklist rows that match no image in the library (adopt them to bring them in).
+    unmatched: Vec<String>,
+}
+
+/// Copies a checklist's hand-kept fields into the library images it names.
+#[tauri::command]
+pub async fn import_checklist(ws: Ws<'_>, path: String) -> Result<ImportReport, String> {
+    let root = project_root(&ws)?;
+    blocking(move || {
+        let rows = read_checklist(Some(path))?;
+        project::update_catalog(&root, |c| {
+            let mut report = ImportReport { updated: 0, unmatched: Vec::new() };
+            for row in &rows {
+                let id = c.by_url(&row.url).map(|i| i.id.clone());
+                match id.and_then(|id| c.get_mut(&id)) {
+                    Some(img) => {
+                        catalog::apply_row(img, row);
+                        report.updated += 1;
+                    }
+                    None => report.unmatched.push(row.url.clone()),
+                }
+            }
+            Ok(report)
+        })
+    })
+    .await
+}
+
+/// Writes the library as a checklist CSV.
+#[tauri::command]
+pub async fn export_checklist(ws: Ws<'_>, path: String) -> Result<(), String> {
+    let blog = current_blog(&ws)?;
+    blocking(move || {
+        let s = project::load_settings(&blog.root)?;
+        let used = adopt::usages(&blog, &s)?;
+        let csv = catalog::export_checklist(&project::load_catalog(&blog.root)?, |id| used.get(id).cloned().unwrap_or_default());
+        std::fs::write(&path, csv).map_err(|e| format!("无法写入 {path}：{e}"))
     })
     .await
 }

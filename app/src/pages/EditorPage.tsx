@@ -1,6 +1,6 @@
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { AlertTriangle, ChevronLeft, ExternalLink, FolderSearch, ImagePlus, PanelRightClose, PanelRightOpen, Send } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ExternalLink, FolderSearch, ImagePlus, Images, PanelRightClose, PanelRightOpen, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FrontMatterForm } from "@/components/FrontMatterForm";
 import { MarkdownEditor, type EditorHandle } from "@/components/MarkdownEditor";
@@ -8,7 +8,9 @@ import { PreviewPane } from "@/components/PreviewPane";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
-import { api, errorText, type BlogConfigView, type ImageFormat, type PageProbe, type PostFile, type PostSummary, type PreviewState, type Uploaded } from "@/lib/api";
+import { ImagePicker } from "@/components/ImagePicker";
+import { api, errorText, type BlogConfigView, type ImageFormat, type Ingested, type PageProbe, type PostFile, type PostSummary, type PreviewState } from "@/lib/api";
+import { applyEdits } from "@/lib/frontmatter";
 import { usePageActive } from "@/lib/pageActive";
 import { cn } from "@/lib/utils";
 
@@ -70,6 +72,7 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
   const [storageReady, setStorageReady] = useState(false);
   const [uploading, setUploading] = useState(0);
   const [dropping, setDropping] = useState(false);
+  const [picking, setPicking] = useState(false);
 
   // Read again whenever the page is shown: the store may have been set up in settings meanwhile.
   useEffect(() => {
@@ -88,7 +91,7 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
    * finishes (or removed if it fails), so typing can go on meanwhile.
    */
   const uploadImages = useCallback(
-    async (items: { label: string; run: () => Promise<Uploaded> }[]) => {
+    async (items: { label: string; run: () => Promise<Ingested> }[]) => {
       if (!items.length) return;
       if (!storageReady) {
         toast("还没有设置图片存储：设置 → 图片存储", "error");
@@ -101,8 +104,12 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
         tagged.map(async (t) => {
           try {
             const r = await t.run();
-            editor.current?.replace(t.mark, `![](${r.url})`);
-            toast(`已上传 ${t.label}（${r.format === "webp" ? `WebP ${kb(r.uploadedBytes)}，原图 ${kb(r.originalBytes)}` : kb(r.uploadedBytes)}）`);
+            editor.current?.replace(t.mark, `![](${r.image.url})`);
+            toast(
+              r.existed
+                ? `图库里已有这张图（${r.image.name}），直接引用`
+                : `已入库 ${t.label}（${r.image.format === "webp" ? `WebP ${kb(r.image.bytes)}，原图 ${kb(r.originalBytes)}` : kb(r.image.bytes)}）`,
+            );
           } catch (e) {
             editor.current?.replace(t.mark, "");
             toast(`${t.label} 上传失败：${errorText(e)}`, "error");
@@ -359,6 +366,10 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
             </button>
           ))}
         </div>
+        <Button size="sm" variant="ghost" onClick={() => setPicking(true)} title="从图片库选图（本文或其他页面的）">
+          <Images />
+          图库
+        </Button>
         <Button size="sm" variant="outline" onClick={() => void chooseImages()} title="插入图片（也可以直接粘贴或拖进来）">
           <ImagePlus />
           {uploading > 0 ? `上传中 ${uploading}` : "图片"}
@@ -397,6 +408,24 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
       )}
       {state === "error" && saveError && <div className="selectable shrink-0 bg-danger-soft px-4 py-2 text-[12.5px] text-danger">{saveError}</div>}
 
+      <ImagePicker
+        open={picking}
+        onClose={() => setPicking(false)}
+        postId={id}
+        onInsert={(img) => {
+          setPicking(false);
+          editor.current?.insert(`![](${img.url})`);
+        }}
+        onCover={(img) => {
+          setPicking(false);
+          try {
+            setYaml(applyEdits(yaml, { cover: img.url }));
+            toast(`已设为封面：${img.name}`);
+          } catch (e) {
+            toast(errorText(e), "error");
+          }
+        }}
+      />
       <Dialog
         open={publishing !== null}
         onClose={() => publishing === "ask" && setPublishing(null)}

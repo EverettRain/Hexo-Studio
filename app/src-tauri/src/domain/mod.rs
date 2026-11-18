@@ -1,5 +1,6 @@
 //! Pure rules: no I/O, no clock, no Tauri.
 
+pub mod catalog;
 pub mod config;
 pub mod deploy_log;
 pub mod image_key;

@@ -38,6 +38,10 @@ opendal = { version = "0.59", default-features = false, features = ["services-os
 # OpenDAL's requests go through reqwest (the same version and TLS setup as the rest of the app).
 opendal-http-transport-reqwest = { version = "0.59", default-features = false, features = ["rustls-no-provider"] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp", "tiff"] }
+# Image uids are content hashes.
+sha2 = "0.10"
+# The image checklist is CSV (imported from and exported to the user's spreadsheet).
+csv = "1"
 # Lossy WebP (the image crate only writes lossless), through libwebp.
 webp = "0.3"
 # Quits through the normal exit path on SIGTERM / SIGINT / SIGHUP, so the preview server stops.

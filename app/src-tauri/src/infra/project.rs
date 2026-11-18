@@ -2,6 +2,7 @@
 //! may be committed, and `local/` for this Mac's state, which its own `.gitignore` keeps out of
 //! git (the blog's `.gitignore` is left alone).
 
+use crate::domain::catalog::Catalog;
 use crate::domain::image_key::Format;
 use crate::domain::storage::Storage;
 use serde::{Deserialize, Serialize};
@@ -78,6 +79,50 @@ pub fn save_settings(root: &Path, s: &ProjectSettings) -> Result<(), String> {
     std::fs::write(settings_path(root), body).map_err(|e| format!("无法保存 {DIR}/settings.json：{e}"))
 }
 
+fn catalog_path(root: &Path) -> PathBuf {
+    dir(root).join("images.json")
+}
+
+/// Serializes changes to `images.json`: uploads run side by side, each adding a record.
+fn catalog_lock() -> &'static std::sync::Mutex<()> {
+    static LOCK: std::sync::OnceLock<std::sync::Mutex<()>> = std::sync::OnceLock::new();
+    LOCK.get_or_init(Default::default)
+}
+
+/// The image library; none yet is an empty one, a file that cannot be read is an error.
+pub fn load_catalog(root: &Path) -> Result<Catalog, String> {
+    match std::fs::read(catalog_path(root)) {
+        Ok(bytes) => serde_json::from_slice(&bytes).map_err(|e| format!("{DIR}/images.json 格式有误：{e}")),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Catalog::default()),
+        Err(e) => Err(format!("无法读取 {DIR}/images.json：{e}")),
+    }
+}
+
+/// Reads, changes and writes the library in one step, one change at a time.
+pub fn update_catalog<T>(root: &Path, change: impl FnOnce(&mut Catalog) -> Result<T, String>) -> Result<T, String> {
+    let _held = catalog_lock().lock().unwrap_or_else(|e| e.into_inner());
+    let mut c = load_catalog(root)?;
+    let out = change(&mut c)?;
+    prepare(root)?;
+    let mut body = serde_json::to_string_pretty(&c).map_err(|e| e.to_string())?;
+    body.push('\n');
+    let path = catalog_path(root);
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, body).and_then(|_| std::fs::rename(&tmp, &path)).map_err(|e| format!("无法保存 {DIR}/images.json：{e}"))?;
+    Ok(out)
+}
+
+/// This Mac's last check of each image (uid → result); not part of the blog.
+pub fn load_checks<T: serde::de::DeserializeOwned + Default>(root: &Path) -> T {
+    std::fs::read(local_dir(root).join("image-checks.json")).ok().and_then(|b| serde_json::from_slice(&b).ok()).unwrap_or_default()
+}
+
+pub fn save_checks<T: Serialize>(root: &Path, checks: &T) -> Result<(), String> {
+    prepare(root)?;
+    let body = serde_json::to_vec_pretty(checks).map_err(|e| e.to_string())?;
+    std::fs::write(local_dir(root).join("image-checks.json"), body).map_err(|e| format!("无法保存检查结果：{e}"))
+}
+
 /// The name image paths use for this blog.
 pub fn project_name(root: &Path, s: &ProjectSettings) -> String {
     match s.name.as_deref().map(str::trim).filter(|n| !n.is_empty()) {
@@ -118,6 +163,40 @@ mod tests {
         // Assert
         assert_eq!(back, s);
         assert_eq!(project_name(root.path(), &back), "MyBlog");
+    }
+
+    #[test]
+    fn library_changes_made_side_by_side_all_land() {
+        // Arrange
+        let root = tempfile::tempdir().unwrap();
+        let image = |id: &str| crate::domain::catalog::Image {
+            id: id.into(),
+            name: id.into(),
+            description: String::new(),
+            ok: None,
+            key: format!("B/{id}.webp"),
+            url: format!("https://c/B/{id}.webp"),
+            uploaded_at: String::new(),
+            mirrors: vec![],
+            format: Format::Webp,
+            bytes: 0,
+            width: 0,
+            height: 0,
+            original: Default::default(),
+            legacy_urls: vec![],
+        };
+
+        // Act
+        std::thread::scope(|s| {
+            for i in 0..8 {
+                let root = root.path();
+                let img = image(&format!("id{i}"));
+                s.spawn(move || update_catalog(root, |c| Ok(c.add(img))).unwrap());
+            }
+        });
+
+        // Assert
+        assert_eq!(load_catalog(root.path()).unwrap().images.len(), 8);
     }
 
     #[test]

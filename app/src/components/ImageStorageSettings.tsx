@@ -1,7 +1,6 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { ArrowRightLeft, CheckCircle2, FolderOpen, Loader2, PlugZap } from "lucide-react";
+import { CheckCircle2, FolderOpen, Loader2, PlugZap } from "lucide-react";
 import { useEffect, useState } from "react";
-import { MigrationDialog } from "@/components/MigrationDialog";
 import { Group } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Input, Label, Select } from "@/components/ui/input";
@@ -25,10 +24,10 @@ function Field({ label, hint, children }: { label: string; hint?: string; childr
   );
 }
 
-/** Where a key would point, as a sample: `<prefix><project>/<page>/<image>.webp`. */
+/** Where a key would point, as a sample: `<prefix><project>/<uid>.webp`. */
 function sampleUrl(storage: Storage, project: string): string {
   const prefix = storage.path.split("/").filter(Boolean).join("/");
-  const key = `${prefix ? `${prefix}/` : ""}${project}/<页面名>/<图片名>.webp`;
+  const key = `${prefix ? `${prefix}/` : ""}${project}/<uid>.webp`;
   const base =
     storage.kind === "aliyunOss"
       ? storage.customUrl.trim() || `https://${storage.bucket || "<桶>"}.${storage.area.startsWith("oss-") ? storage.area : `oss-${storage.area}`}.aliyuncs.com`
@@ -53,7 +52,6 @@ export function ImageStorageSettings() {
   const [backupDir, setBackupDir] = useState("");
   const [busy, setBusy] = useState<"save" | "check" | null>(null);
   const [checked, setChecked] = useState(false);
-  const [migrating, setMigrating] = useState(false);
 
   const fill = (s: ImageSettings) => {
     setSaved(s);
@@ -208,7 +206,7 @@ export function ImageStorageSettings() {
             <Input type="number" min={0} step={10} value={maxEdge} disabled={format !== "webp"} onChange={(e) => setMaxEdge(Number(e.target.value) || 0)} />
           </Field>
         </div>
-        <Field label="母图保存位置（本机）" hint="每张上传的图片都先把原文件原样存在这里：<项目名>/<页面名>/<原文件名>。">
+        <Field label="母图保存位置（本机）" hint="每张入库的图片都先把原文件原样存在这里：<项目名>/<uid>-<原文件名>。">
           <div className="flex gap-1.5">
             <Input value={backupDir} onChange={(e) => setBackupDir(e.target.value)} className="font-mono text-[12px]" />
             <Button variant="outline" size="icon" title="选择文件夹" onClick={() => void chooseBackup()}>
@@ -217,12 +215,6 @@ export function ImageStorageSettings() {
           </div>
         </Field>
         <div className="flex items-end justify-end gap-2">
-          {storage && saved.storage && (
-            <Button variant="ghost" disabled={busy !== null || dirty || !saved.accessKeyId} onClick={() => setMigrating(true)} title="把桶根目录的旧图片迁到项目目录并转成 WebP">
-              <ArrowRightLeft />
-              迁移旧图
-            </Button>
-          )}
           {storage && (
             <Button variant="outline" disabled={busy !== null || dirty || !saved.accessKeyId} onClick={() => void check()} title={dirty ? "先保存" : undefined}>
               {busy === "check" ? <Loader2 className="animate-spin" /> : checked ? <CheckCircle2 className="text-ok" /> : <PlugZap />}
@@ -234,7 +226,6 @@ export function ImageStorageSettings() {
           </Button>
         </div>
       </div>
-      <MigrationDialog open={migrating} onClose={() => setMigrating(false)} />
     </Group>
   );
 }

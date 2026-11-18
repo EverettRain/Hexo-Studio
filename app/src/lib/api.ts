@@ -169,34 +169,87 @@ export interface ImageSettingsInput {
   backupDir: string | null;
 }
 
-export interface Uploaded {
+export interface Mirror {
+  label: string;
   url: string;
+  date: string;
+}
+
+/** One image of the project's library (`.hexostudio/images.json`). */
+export interface ImageRecord {
+  id: string;
+  name: string;
+  description: string;
+  /** 是否正常, marked by hand. */
+  ok: boolean | null;
   key: string;
-  backup: string;
+  url: string;
+  uploadedAt: string;
+  mirrors: Mirror[];
   format: ImageFormat;
+  bytes: number;
+  width: number;
+  height: number;
+  original: { fileName: string; bytes: number; backup: string };
+  legacyUrls: string[];
+}
+
+export interface ImageCheck {
+  /** Unix seconds. */
+  at: number;
+  ok: boolean;
+  message: string;
+}
+
+export interface LibraryImage extends ImageRecord {
+  /** Files that use it, from the blog root. */
+  usedBy: string[];
+  check: ImageCheck | null;
+  backupPath: string | null;
+}
+
+export interface Library {
+  images: LibraryImage[];
+  /** Images of the store the blog uses that are not in the library yet. */
+  unadopted: number;
+  /** Titles of posts and pages by file. */
+  titles: Record<string, string>;
+  /** Appended to an image address for a thumbnail, when the store can scale. */
+  thumbQuery: string | null;
+}
+
+export interface Ingested {
+  image: ImageRecord;
+  /** The library had this picture already: nothing was uploaded. */
+  existed: boolean;
   originalBytes: number;
-  uploadedBytes: number;
 }
 
-export interface PlannedMove {
-  oldUrl: string;
+export interface AdoptionCandidate {
   oldKey: string;
-  newKey: string;
-  format: ImageFormat;
+  oldUrl: string;
   files: string[];
+  name: string | null;
+  description: string | null;
 }
 
-export interface MigrationProgress {
+export interface AdoptionProgress {
   done: number;
   total: number;
   current: string;
 }
 
-export interface MigrationReport {
-  moved: { oldKey: string; newUrl: string }[];
+export interface AdoptionReport {
+  adopted: string[];
   failed: { oldKey: string; error: string }[];
   changedFiles: string[];
 }
+
+export interface ImportReport {
+  updated: number;
+  unmatched: string[];
+}
+
 
 export const api = {
   appInfo: () => invoke<AppInfo>("app_info"),
@@ -228,14 +281,23 @@ export const api = {
   imageSettings: () => invoke<ImageSettings>("image_settings"),
   saveImageSettings: (input: ImageSettingsInput) => invoke<ImageSettings>("save_image_settings", { input }),
   checkStorage: () => invoke<void>("check_storage"),
-  migrationPlan: () => invoke<PlannedMove[]>("migration_plan"),
-  runMigration: () => invoke<MigrationReport>("run_migration"),
-  uploadImageFile: (postId: string, path: string, format: ImageFormat) => invoke<Uploaded>("upload_image_file", { postId, path, format }),
+  imageLibrary: () => invoke<Library>("image_library"),
+  updateImage: (id: string, patch: { name: string; description: string; ok: boolean | null; mirrors: Mirror[] }) =>
+    invoke<ImageRecord>("update_image", { id, patch }),
+  deleteImage: (id: string) => invoke<void>("delete_image", { id }),
+  checkImages: () => invoke<Record<string, ImageCheck>>("check_images"),
+  revealPath: (path: string) => invoke<void>("reveal_path", { path }),
+  adoptionPlan: (checklist: string | null) => invoke<AdoptionCandidate[]>("adoption_plan", { checklist }),
+  runAdoption: (checklist: string | null) => invoke<AdoptionReport>("run_adoption", { checklist }),
+  importChecklist: (path: string) => invoke<ImportReport>("import_checklist", { path }),
+  exportChecklist: (path: string) => invoke<void>("export_checklist", { path }),
+  /** `postId` null: added on the image page, not for a post. */
+  uploadImageFile: (postId: string | null, path: string, format: ImageFormat) => invoke<Ingested>("upload_image_file", { postId, path, format }),
   /** Pasted bytes go as the raw request body; text travels in headers, percent-encoded. */
   /** `name` empty: a screenshot, named by the time it was pasted. */
-  uploadImageBytes: async (postId: string, file: Blob, name: string, format: ImageFormat) =>
-    invoke<Uploaded>("upload_image_bytes", new Uint8Array(await file.arrayBuffer()), {
-      headers: { "x-post": encodeURIComponent(postId), "x-name": encodeURIComponent(name), "x-format": format },
+  uploadImageBytes: async (postId: string | null, file: Blob, name: string, format: ImageFormat) =>
+    invoke<Ingested>("upload_image_bytes", new Uint8Array(await file.arrayBuffer()), {
+      headers: { "x-post": encodeURIComponent(postId ?? ""), "x-name": encodeURIComponent(name), "x-format": format },
     }),
 };
 

@@ -43,31 +43,29 @@ pub fn screenshot_stem(at: DateTime) -> String {
     format!("image-{}", at.strftime("%Y%m%d-%H%M%S"))
 }
 
-/// `<prefix><project>/<page>/<stem>.<ext>`; the page keeps its folders (`notes/c1`).
-pub fn object_key(prefix: &str, project: &str, page: &str, stem: &str, ext: &str) -> String {
-    let page: Vec<String> = page.split('/').filter(|p| !p.is_empty()).map(segment).collect();
-    let name = if ext.is_empty() { segment(stem) } else { format!("{}.{ext}", segment(stem)) };
-    format!("{prefix}{}/{}/{name}", segment(project), page.join("/"))
+/// An image's uid: the first 12 hex digits of the SHA-256 of its original bytes. The same
+/// picture always gets the same uid, so it is stored once however often it is added.
+pub fn content_id(original: &[u8]) -> String {
+    use sha2::Digest;
+    let digest = sha2::Sha256::digest(original);
+    digest.iter().take(6).map(|b| format!("{b:02x}")).collect()
 }
 
-/// `a/b.webp` → `a/b-2.webp` for `n = 2`: the next name to try when one is taken.
-pub fn numbered(key: &str, n: u32) -> String {
-    let name_start = key.rfind('/').map_or(0, |i| i + 1);
-    match key[name_start..].rfind('.') {
-        Some(dot) if dot > 0 => {
-            let at = name_start + dot;
-            format!("{}-{n}{}", &key[..at], &key[at..])
-        }
-        _ => format!("{key}-{n}"),
-    }
+/// `<prefix><project>/<uid>.<ext>`: images belong to the project, not to a page (one image may
+/// be on many pages; which ones is worked out from the blog's text).
+pub fn object_key(prefix: &str, project: &str, id: &str, ext: &str) -> String {
+    format!("{prefix}{}/{id}.{ext}", segment(project))
 }
 
-/// The first of `key`, `key-2`, `key-3`, ... that `taken` says is free.
-pub fn first_free(key: &str, mut taken: impl FnMut(&str) -> bool) -> String {
-    if !taken(key) {
-        return key.to_string();
+/// The original's file name in the backup folder: `<uid>-<name>.<ext>`, readable in Finder and
+/// unique by its uid.
+pub fn backup_name(id: &str, original_file_name: &str) -> String {
+    let (stem, ext) = split_name(original_file_name);
+    if ext.is_empty() {
+        format!("{id}-{}", segment(stem))
+    } else {
+        format!("{id}-{}.{ext}", segment(stem))
     }
-    (2..).map(|n| numbered(key, n)).find(|k| !taken(k)).expect("an unbounded range ends with a free name")
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -139,21 +137,31 @@ mod tests {
     }
 
     #[test]
-    fn keys_are_project_page_image_under_the_prefix() {
+    fn the_uid_depends_only_on_the_content() {
         // Act
-        let key = object_key("img/", "EverettBlog", "pointer-security", "Smart pointer 图", "webp");
+        let a = content_id(b"same bytes");
+        let again = content_id(b"same bytes");
+        let other = content_id(b"other bytes");
 
         // Assert
-        assert_eq!(key, "img/EverettBlog/pointer-security/Smart-pointer-图.webp");
+        assert_eq!(a, again);
+        assert_ne!(a, other);
+        assert_eq!(a.len(), 12);
+        assert!(a.chars().all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
     }
 
     #[test]
-    fn a_page_in_a_subfolder_keeps_its_folders() {
-        // Act
-        let key = object_key("", "Blog", "notes/c 1", "a", "png");
+    fn keys_are_the_uid_under_the_project_and_prefix() {
+        // Act / Assert
+        assert_eq!(object_key("img/", "EverettBlog", "3f9a1c07b2e4", "webp"), "img/EverettBlog/3f9a1c07b2e4.webp");
+        assert_eq!(object_key("", "My Blog", "3f9a1c07b2e4", "gif"), "My-Blog/3f9a1c07b2e4.gif");
+    }
 
-        // Assert
-        assert_eq!(key, "Blog/notes/c-1/a.png");
+    #[test]
+    fn backups_are_named_by_uid_and_original_name() {
+        // Act / Assert
+        assert_eq!(backup_name("3f9a1c07b2e4", "IMG 1442.JPG"), "3f9a1c07b2e4-IMG-1442.jpg");
+        assert_eq!(backup_name("3f9a1c07b2e4", "README"), "3f9a1c07b2e4-README");
     }
 
     #[test]
@@ -163,20 +171,6 @@ mod tests {
 
         // Assert
         assert_eq!(stem, "image-20251124-011420");
-    }
-
-    #[test]
-    fn taken_names_get_the_next_number_before_the_extension() {
-        // Arrange
-        let taken = ["p/a.webp", "p/a-2.webp"];
-
-        // Act
-        let key = first_free("p/a.webp", |k| taken.contains(&k));
-
-        // Assert
-        assert_eq!(key, "p/a-3.webp");
-        assert_eq!(first_free("p/free.webp", |_| false), "p/free.webp");
-        assert_eq!(numbered("p.v1/readme", 2), "p.v1/readme-2");
     }
 
     #[test]

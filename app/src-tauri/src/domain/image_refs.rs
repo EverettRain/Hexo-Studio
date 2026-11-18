@@ -1,7 +1,7 @@
-//! Finding a store's images in the blog's text, and planning their move to
-//! `<prefix><project>/<page>/<name>.webp` (design section 6.3).
+//! Finding a store's images in the blog's text: which library images each file uses, which
+//! store images the library does not have yet, and rewriting addresses (design section 6.3).
 
-use super::image_key::{self, Format};
+use super::catalog::{Catalog, ChecklistRow};
 use std::collections::BTreeMap;
 
 /// One occurrence of a store address in a file.
@@ -46,79 +46,94 @@ pub fn find(text: &str, bases: &[String]) -> Vec<Found> {
     out
 }
 
-/// A text file of the blog and the page its images belong to.
+/// A text file of the blog.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Source {
     /// Path from the blog root, e.g. `source/_posts/a.md`.
     pub file: String,
-    /// The page name for image paths; `None` for site-wide files (configs, `_data`).
-    pub page: Option<String>,
+    /// The post's or page's title; `None` for configs and data files.
+    pub title: Option<String>,
     pub text: String,
 }
 
-/// One image to move.
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct Move {
-    /// Every way the blog writes its address (encoded or not, custom domain or bucket's).
-    pub old_urls: Vec<String>,
-    pub old_key: String,
-    /// Where it goes before a free name is chosen (`-2` … if taken).
-    pub new_key: String,
-    pub format: Format,
-    /// Files that refer to it, in the order given.
-    pub files: Vec<String>,
-}
-
-/// Page used for images that only site-wide files refer to.
-pub const SITE_PAGE: &str = "_site";
-
-/// Plans the move of every image of the store not yet under `<prefix><project>/`. An image goes
-/// under the first page (in `sources` order) that refers to it, else under `_site`.
-pub fn plan(sources: &[Source], bases: &[String], prefix: &str, project: &str) -> Vec<Move> {
-    let done = format!("{prefix}{}/", image_key::segment(project));
-    let mut moves: BTreeMap<String, (usize, Move, bool)> = BTreeMap::new();
-    let mut order = 0;
+/// Which files use each library image (by uid), found by its address or a former one.
+pub fn usages(sources: &[Source], bases: &[String], catalog: &Catalog) -> BTreeMap<String, Vec<String>> {
+    let mut out: BTreeMap<String, Vec<String>> = BTreeMap::new();
     for src in sources {
         for f in find(&src.text, bases) {
-            if f.key.starts_with(&done) {
-                continue;
-            }
-            let entry = moves.entry(f.key.clone()).or_insert_with(|| {
-                order += 1;
-                (
-                    order,
-                    Move { old_urls: Vec::new(), old_key: f.key.clone(), new_key: String::new(), format: Format::Webp, files: Vec::new() },
-                    false,
-                )
-            });
-            if !entry.1.old_urls.contains(&f.url) {
-                entry.1.old_urls.push(f.url.clone());
-            }
-            if !entry.1.files.contains(&src.file) {
-                entry.1.files.push(src.file.clone());
-            }
-            if !entry.2 {
-                if let Some(page) = &src.page {
-                    entry.1.new_key = page.clone();
-                    entry.2 = true;
-                }
+            let Some(img) = catalog.by_key(&f.key).or_else(|| catalog.by_url(&f.url)) else { continue };
+            let files = out.entry(img.id.clone()).or_default();
+            if !files.contains(&src.file) {
+                files.push(src.file.clone());
             }
         }
     }
-    let mut list: Vec<(usize, Move)> = moves
-        .into_values()
-        .map(|(n, mut m, _)| {
-            let page = if m.new_key.is_empty() { SITE_PAGE.to_string() } else { m.new_key.clone() };
-            let file_name = m.old_key.rsplit('/').next().unwrap_or(&m.old_key).to_string();
-            let (stem, ext) = image_key::split_name(&file_name);
-            m.format = image_key::output_format(&ext, Format::Webp);
-            let out_ext = if m.format == Format::Webp { "webp".to_string() } else { ext };
-            m.new_key = image_key::object_key(prefix, project, &page, stem, &out_ext);
-            (n, m)
-        })
-        .collect();
-    list.sort_by_key(|(n, _)| *n);
-    list.into_iter().map(|(_, m)| m).collect()
+    out
+}
+
+/// An image in the store that the library does not have yet.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Candidate {
+    pub old_key: String,
+    /// Every way the blog (or the checklist) writes its address.
+    pub old_urls: Vec<String>,
+    /// Files that refer to it, in the order given.
+    pub files: Vec<String>,
+    /// The title of the first post or page using it, for a default description.
+    pub first_title: Option<String>,
+    /// What the user's checklist says about it, when a checklist was given.
+    pub row: Option<ChecklistRow>,
+}
+
+/// The store's images to take into the library: those the blog refers to and those the
+/// checklist lists, minus what the library has (by key or former address). In order of first
+/// mention: the blog's files first, then the checklist's remaining rows.
+pub fn adoption(sources: &[Source], bases: &[String], catalog: &Catalog, checklist: &[ChecklistRow]) -> Vec<Candidate> {
+    let mut list: Vec<Candidate> = Vec::new();
+    let known = |f: &Found| catalog.by_key(&f.key).is_some() || catalog.by_url(&f.url).is_some();
+    let mut note = |f: Found, file: Option<&str>, title: Option<&String>| {
+        let at = match list.iter().position(|c| c.old_key == f.key) {
+            Some(i) => i,
+            None => {
+                list.push(Candidate { old_key: f.key.clone(), old_urls: Vec::new(), files: Vec::new(), first_title: None, row: None });
+                list.len() - 1
+            }
+        };
+        let c = &mut list[at];
+        if !c.old_urls.contains(&f.url) {
+            c.old_urls.push(f.url.clone());
+        }
+        if let Some(file) = file {
+            if !c.files.iter().any(|x| x == file) {
+                c.files.push(file.to_string());
+            }
+        }
+        if c.first_title.is_none() {
+            c.first_title = title.cloned();
+        }
+    };
+    for src in sources {
+        for f in find(&src.text, bases) {
+            if !known(&f) {
+                note(f, Some(&src.file), src.title.as_ref());
+            }
+        }
+    }
+    for row in checklist {
+        if let Some(f) = find(&row.url, bases).into_iter().next() {
+            if !known(&f) {
+                note(f, None, None);
+            }
+        }
+    }
+    for row in checklist {
+        if let Some(f) = find(&row.url, bases).into_iter().next() {
+            if let Some(c) = list.iter_mut().find(|c| c.old_key == f.key) {
+                c.row = Some(row.clone());
+            }
+        }
+    }
+    list
 }
 
 /// Replaces whole addresses in a text: `from` only where it ends at an address boundary, so
@@ -151,8 +166,27 @@ mod tests {
         vec![BASE.to_string()]
     }
 
-    fn src(file: &str, page: Option<&str>, text: &str) -> Source {
-        Source { file: file.into(), page: page.map(String::from), text: text.into() }
+    fn src(file: &str, title: Option<&str>, text: &str) -> Source {
+        Source { file: file.into(), title: title.map(String::from), text: text.into() }
+    }
+
+    fn library_image(id: &str, legacy: &str) -> crate::domain::catalog::Image {
+        crate::domain::catalog::Image {
+            id: id.into(),
+            name: id.into(),
+            description: String::new(),
+            ok: None,
+            key: format!("Blog/{id}.webp"),
+            url: format!("{BASE}/Blog/{id}.webp"),
+            uploaded_at: String::new(),
+            mirrors: vec![],
+            format: crate::domain::image_key::Format::Webp,
+            bytes: 0,
+            width: 0,
+            height: 0,
+            original: Default::default(),
+            legacy_urls: vec![legacy.into()],
+        }
     }
 
     #[test]
@@ -183,48 +217,47 @@ mod tests {
     }
 
     #[test]
-    fn an_image_goes_under_the_first_page_that_uses_it() {
+    fn usages_count_new_and_former_addresses_once_per_file() {
         // Arrange
+        let catalog = Catalog { version: 1, images: vec![library_image("aaa", &format!("{BASE}/old.jpg"))] };
         let sources = [
-            src("_config.anzhiyu.yml", None, &format!("avatar: {BASE}/avatar.jpg")),
-            src("source/_posts/a.md", Some("a"), &format!("![]({BASE}/IMG_1.JPG) ![]({BASE}/avatar.jpg)")),
-            src("source/_posts/b.md", Some("b"), &format!("![]({BASE}/IMG_1.JPG)")),
+            src("source/_posts/a.md", Some("A"), &format!("![]({BASE}/Blog/aaa.webp) ![]({BASE}/Blog/aaa.webp)")),
+            src("source/_posts/b.md", Some("B"), &format!("cover: {BASE}/old.jpg")),
+            src("_config.yml", None, &format!("x: {BASE}/unknown.png")),
         ];
 
         // Act
-        let moves = plan(&sources, &bases(), "", "EverettBlog");
+        let used = usages(&sources, &bases(), &catalog);
 
         // Assert
-        let keys: Vec<(&str, &str)> = moves.iter().map(|m| (m.old_key.as_str(), m.new_key.as_str())).collect();
-        assert_eq!(keys, [("avatar.jpg", "EverettBlog/a/avatar.webp"), ("IMG_1.JPG", "EverettBlog/a/IMG_1.webp")]);
-        assert_eq!(moves[0].files, ["_config.anzhiyu.yml", "source/_posts/a.md"]);
-        assert_eq!(moves[1].files, ["source/_posts/a.md", "source/_posts/b.md"]);
+        assert_eq!(used.len(), 1);
+        assert_eq!(used["aaa"], ["source/_posts/a.md", "source/_posts/b.md"]);
     }
 
     #[test]
-    fn site_wide_images_go_under_site_and_gifs_keep_their_format() {
+    fn adoption_lists_images_the_library_lacks_with_their_files_and_checklist_row() {
         // Arrange
-        let sources = [src("source/_data/link.yml", None, &format!("- avatar: {BASE}/friend.gif"))];
+        let catalog = Catalog { version: 1, images: vec![library_image("aaa", &format!("{BASE}/known.jpg"))] };
+        let sources = [
+            src("_config.anzhiyu.yml", None, &format!("avatar: {BASE}/avatar.jpg")),
+            src("source/_posts/a.md", Some("文章 A"), &format!("![]({BASE}/IMG_1.JPG) ![]({BASE}/avatar.jpg) ![]({BASE}/known.jpg)")),
+            src("source/_posts/b.md", Some("文章 B"), &format!("![]({BASE}/IMG_1.JPG)")),
+        ];
+        let row = ChecklistRow { name: "unused one".into(), url: format!("{BASE}/unused.png"), ..ChecklistRow::default() };
+        let avatar_row = ChecklistRow { name: "avatar".into(), url: format!("{BASE}/avatar.jpg"), ..ChecklistRow::default() };
 
         // Act
-        let moves = plan(&sources, &bases(), "img/", "EverettBlog");
+        let list = adoption(&sources, &bases(), &catalog, &[row.clone(), avatar_row.clone()]);
 
         // Assert
-        assert_eq!(moves[0].new_key, "img/EverettBlog/_site/friend.gif");
-        assert_eq!(moves[0].format, Format::Original);
-    }
-
-    #[test]
-    fn images_already_under_the_project_are_left_alone() {
-        // Arrange
-        let sources = [src("source/_posts/a.md", Some("a"), &format!("![]({BASE}/EverettBlog/a/x.webp) ![]({BASE}/old.png)"))];
-
-        // Act
-        let moves = plan(&sources, &bases(), "", "EverettBlog");
-
-        // Assert
-        assert_eq!(moves.len(), 1);
-        assert_eq!(moves[0].old_key, "old.png");
+        let keys: Vec<&str> = list.iter().map(|c| c.old_key.as_str()).collect();
+        assert_eq!(keys, ["avatar.jpg", "IMG_1.JPG", "unused.png"]);
+        assert_eq!(list[0].files, ["_config.anzhiyu.yml", "source/_posts/a.md"]);
+        assert_eq!(list[0].first_title.as_deref(), Some("文章 A"));
+        assert_eq!(list[0].row, Some(avatar_row));
+        assert_eq!(list[1].files, ["source/_posts/a.md", "source/_posts/b.md"]);
+        assert!(list[2].files.is_empty());
+        assert_eq!(list[2].row, Some(row));
     }
 
     #[test]

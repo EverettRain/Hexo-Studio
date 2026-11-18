@@ -90,8 +90,15 @@ pub fn run() {
             commands::check_storage,
             commands::upload_image_file,
             commands::upload_image_bytes,
-            commands::migration_plan,
-            commands::run_migration,
+            commands::image_library,
+            commands::update_image,
+            commands::delete_image,
+            commands::check_images,
+            commands::reveal_path,
+            commands::adoption_plan,
+            commands::run_adoption,
+            commands::import_checklist,
+            commands::export_checklist,
         ])
         .setup(|app| {
             let handle = app.handle().clone();
