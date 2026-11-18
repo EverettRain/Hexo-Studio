@@ -1,7 +1,8 @@
 import { getCurrentWebview } from "@tauri-apps/api/webview";
 import { open as openDialog } from "@tauri-apps/plugin-dialog";
-import { AlertTriangle, ChevronLeft, ExternalLink, FolderSearch, ImagePlus, Images, PanelRightClose, PanelRightOpen, Send } from "lucide-react";
+import { AlertTriangle, ChevronLeft, ExternalLink, FolderSearch, PanelRightClose, PanelRightOpen, Search, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { EditorToolbar } from "@/components/EditorToolbar";
 import { FrontMatterForm } from "@/components/FrontMatterForm";
 import { MarkdownEditor, type EditorHandle } from "@/components/MarkdownEditor";
 import { PreviewPane } from "@/components/PreviewPane";
@@ -11,6 +12,7 @@ import { useToast } from "@/components/ui/toast";
 import { ImagePicker } from "@/components/ImagePicker";
 import { api, errorText, type BlogConfigView, type ImageFormat, type Ingested, type PageProbe, type PostFile, type PostSummary, type PreviewState } from "@/lib/api";
 import { applyEdits } from "@/lib/frontmatter";
+import { wordCount, type FormatState } from "@/lib/markdownCommands";
 import { usePageActive } from "@/lib/pageActive";
 import { cn } from "@/lib/utils";
 
@@ -39,6 +41,15 @@ const pastedName = (f: File) => (/^image\.\w+$/i.test(f.name) ? "" : f.name);
 /** Typing stops this long before the post is saved (and the preview refreshed). */
 const AUTOSAVE_MS = 1000;
 const PREVIEW_WIDTH_KEY = "hexo-studio.preview-width";
+const META_OPEN_KEY = "hexo-studio.meta-open";
+
+function readMetaOpen(): boolean {
+  try {
+    return localStorage.getItem(META_OPEN_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 function readWidth(): number {
   try {
@@ -73,6 +84,18 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
   const [uploading, setUploading] = useState(0);
   const [dropping, setDropping] = useState(false);
   const [picking, setPicking] = useState(false);
+  const [metaOpen, setMetaOpen] = useState(readMetaOpen);
+  const [fmt, setFmt] = useState<FormatState | null>(null);
+  const words = useMemo(() => wordCount(body), [body]);
+
+  const toggleMeta = (open: boolean) => {
+    setMetaOpen(open);
+    try {
+      localStorage.setItem(META_OPEN_KEY, open ? "1" : "0");
+    } catch {
+      /* storage unavailable */
+    }
+  };
 
   // Read again whenever the page is shown: the store may have been set up in settings meanwhile.
   useEffect(() => {
@@ -355,25 +378,6 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
         </span>
         <span className="min-w-0 truncate font-mono text-[12px] text-muted">{file.summary.fileName}</span>
         <span className="flex-1" />
-        <div className="flex h-[26px] items-center rounded-[7px] bg-pill p-0.5 text-[11.5px]" title="上传格式（默认值在设置里改）">
-          {(["webp", "original"] as const).map((f) => (
-            <button
-              key={f}
-              onClick={() => setFormat(f)}
-              className={cn("h-[22px] rounded-[5px] px-2 active:!scale-100", format === f ? "bg-card font-medium text-fg shadow-edge dark:bg-white/[.1]" : "text-muted hover:text-fg")}
-            >
-              {f === "webp" ? "WebP" : "原图"}
-            </button>
-          ))}
-        </div>
-        <Button size="sm" variant="ghost" onClick={() => setPicking(true)} title="从图片库选图（本文或其他页面的）">
-          <Images />
-          图库
-        </Button>
-        <Button size="sm" variant="outline" onClick={() => void chooseImages()} title="插入图片（也可以直接粘贴或拖进来）">
-          <ImagePlus />
-          {uploading > 0 ? `上传中 ${uploading}` : "图片"}
-        </Button>
         {file.summary.kind === "draft" && (
           <Button size="sm" variant="outline" onClick={() => setPublishing("ask")} disabled={publishing !== null || state === "conflict"}>
             <Send />
@@ -383,6 +387,9 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
         <span className={cn("text-[12px]", state === "error" || state === "conflict" ? "text-danger" : "text-muted")} title={saveError ?? undefined}>
           {statusText[state]}
         </span>
+        <button title="查找与替换  ⌘F" onClick={() => editor.current?.openSearch()} className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] text-muted hover:bg-pill hover:text-fg">
+          <Search className="h-[15px] w-[15px]" />
+        </button>
         <button title="在 Finder 中显示" onClick={() => void api.revealPost(id).catch((e) => toast(errorText(e), "error"))} className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] text-muted hover:bg-pill hover:text-fg">
           <FolderSearch className="h-[15px] w-[15px]" />
         </button>
@@ -449,8 +456,17 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
             松开以上传图片（{format === "webp" ? "转成 WebP" : "原图"}），插入到光标处
           </div>
         )}
-        <div className="flex min-w-0 flex-1 flex-col overflow-y-auto">
-          <div className="border-b-[0.5px] border-line-2 px-6 py-4">
+        <div className="flex min-w-0 flex-1 flex-col">
+          <EditorToolbar
+            format={fmt}
+            run={(cmd) => editor.current?.run(cmd)}
+            onUpload={() => void chooseImages()}
+            onLibrary={() => setPicking(true)}
+            imageFormat={format}
+            onImageFormat={setFormat}
+            uploading={uploading}
+          />
+          <div className={cn("shrink-0 border-b-[0.5px] border-line-2 px-4", metaOpen && "max-h-[55%] overflow-y-auto")}>
             <FrontMatterForm
               yaml={yaml}
               onChange={setYaml}
@@ -458,16 +474,31 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
               timezone={config.timezone}
               tagSuggestions={suggestions.tags}
               categorySuggestions={suggestions.categories}
+              open={metaOpen}
+              onOpenChange={toggleMeta}
             />
           </div>
-          <div className="min-h-[60vh] flex-1">
-            <MarkdownEditor
+          {/* Absolute, so CodeMirror gets a definite height to scroll in rather than growing past the status bar. */}
+          <div className="relative min-h-0 flex-1">
+            <div className="absolute inset-0">
+              <MarkdownEditor
               handle={editor}
               value={body}
               onChange={setBody}
               onSave={() => void save()}
+              onFormat={setFmt}
               onPasteImages={(files) => void uploadImages(files.map((f) => ({ label: f.name || "截图", run: () => api.uploadImageBytes(id, f, pastedName(f), format) })))}
-            />
+              />
+            </div>
+          </div>
+          <div className="flex h-6 shrink-0 items-center gap-3 border-t-[0.5px] border-line-2 px-4 text-[11px] tabular-nums text-muted">
+            {fmt && (
+              <span>
+                第 {fmt.line} 行，第 {fmt.column} 列
+              </span>
+            )}
+            <span className="flex-1" />
+            <span title="中日韩文字按字、其他文字按词计，不含代码块、图片、链接地址和标签插件">{words.toLocaleString()} 字</span>
           </div>
         </div>
         {showPreview && (

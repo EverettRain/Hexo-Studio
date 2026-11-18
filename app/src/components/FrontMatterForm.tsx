@@ -1,4 +1,4 @@
-import { ChevronRight, Code2, Clock } from "lucide-react";
+import { AlertTriangle, ChevronRight, Code2, Clock } from "lucide-react";
 import { useMemo, useState } from "react";
 import { TagInput } from "@/components/TagInput";
 import { Input, Label, Textarea } from "@/components/ui/input";
@@ -13,6 +13,9 @@ interface FrontMatterFormProps {
   timezone: string | null;
   tagSuggestions: string[];
   categorySuggestions: string[];
+  /** Folded to one summary line, out of the way of the body. */
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
 }
 
 const text = (v: unknown): string => (v === null || v === undefined ? "" : typeof v === "string" ? v : String(v));
@@ -27,12 +30,46 @@ function Field({ label, children, className }: { label: string; children: React.
   );
 }
 
+/** The fields that matter at a glance, on the folded line. */
+function Summary({ values, error }: { values: Record<string, unknown>; error: boolean }) {
+  if (error) {
+    return (
+      <span className="flex min-w-0 items-center gap-1 text-danger">
+        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+        YAML 有误，展开修改
+      </span>
+    );
+  }
+  const title = text(values.title);
+  const date = text(values.date);
+  const cats = names(values.categories);
+  const tags = names(values.tags);
+  const cover = text(values.cover);
+  return (
+    <span className="flex min-w-0 flex-1 items-center gap-2.5 overflow-hidden whitespace-nowrap">
+      <span className={cn("max-w-[55%] shrink-0 truncate font-medium", title ? "text-fg" : "text-faint")}>{title || "无标题"}</span>
+      {date && <span className="shrink-0 tabular-nums text-muted">{date.replace(/:\d\d$/, "")}</span>}
+      {cats.length > 0 && <span className="min-w-0 shrink truncate text-muted">{cats.join(" / ")}</span>}
+      {tags.length > 0 && (
+        <span className="flex min-w-0 flex-1 gap-1 overflow-hidden">
+          {tags.map((t) => (
+            <span key={t} className="shrink-0 rounded-[5px] bg-pill px-1.5 text-[11.5px] leading-[18px] text-fg-2">
+              {t}
+            </span>
+          ))}
+        </span>
+      )}
+      {cover && <img src={cover} alt="" className="ml-auto h-5 w-8 shrink-0 rounded-[3px] object-cover shadow-edge" />}
+    </span>
+  );
+}
+
 /**
  * The post's front-matter as a form. Each change rewrites only that key in the YAML text
  * (`applyEdits`); "源码" edits the text itself, which also holds the keys the form has no
  * control for. Unreadable YAML opens in source mode.
  */
-export function FrontMatterForm({ yaml, onChange, onError, timezone, tagSuggestions, categorySuggestions }: FrontMatterFormProps) {
+export function FrontMatterForm({ yaml, onChange, onError, timezone, tagSuggestions, categorySuggestions, open, onOpenChange }: FrontMatterFormProps) {
   const parsed = useMemo(() => readFrontMatter(yaml), [yaml]);
   const [source, setSource] = useState(false);
   const [more, setMore] = useState(false);
@@ -52,23 +89,42 @@ export function FrontMatterForm({ yaml, onChange, onError, timezone, tagSuggesti
   const dateInput = toInputValue(dateText);
   const topImg = values.top_img;
 
+  const header = (
+    <div className="flex h-9 items-center gap-2 text-[12.5px]">
+      <button type="button" onClick={() => onOpenChange(!open)} title={open ? "收起文章信息" : "展开文章信息"} className="flex min-w-0 flex-1 items-center gap-1.5 text-left active:!scale-100">
+        <ChevronRight className={cn("h-3.5 w-3.5 shrink-0 text-muted transition-transform", open && "rotate-90")} />
+        <span className="shrink-0 font-medium text-muted">文章信息</span>
+        {!open && <Summary values={values} error={parsed.values === null} />}
+      </button>
+      {open && (
+        <>
+          <button
+            type="button"
+            onClick={() => setMore((m) => !m)}
+            disabled={showSource}
+            className={cn("flex h-6 items-center rounded-md px-2 text-[12px] text-muted hover:bg-pill hover:text-fg disabled:opacity-40", more && !showSource && "bg-pill text-fg")}
+          >
+            更多字段
+          </button>
+          <button
+            type="button"
+            onClick={() => setSource((s) => !s)}
+            disabled={parsed.values === null}
+            className={cn("flex h-6 items-center gap-1 rounded-md px-2 text-[12px] text-muted hover:bg-pill hover:text-fg", showSource && "bg-pill text-fg")}
+          >
+            <Code2 className="h-3.5 w-3.5" />
+            源码
+          </button>
+        </>
+      )}
+    </div>
+  );
+
+  if (!open) return header;
+
   return (
-    <div className="space-y-3">
-      <div className="flex items-center justify-between">
-        <button type="button" onClick={() => setMore((m) => !m)} className="flex items-center gap-1 text-[12px] font-medium text-muted hover:text-fg" disabled={showSource}>
-          <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", more && !showSource && "rotate-90")} />
-          更多字段
-        </button>
-        <button
-          type="button"
-          onClick={() => setSource((s) => !s)}
-          disabled={parsed.values === null}
-          className={cn("flex h-6 items-center gap-1 rounded-md px-2 text-[12px] text-muted hover:bg-pill hover:text-fg", showSource && "bg-pill text-fg")}
-        >
-          <Code2 className="h-3.5 w-3.5" />
-          源码
-        </button>
-      </div>
+    <div className="space-y-2 pb-4">
+      {header}
 
       {showSource ? (
         <div className="space-y-1">

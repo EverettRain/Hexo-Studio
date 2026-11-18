@@ -1,11 +1,12 @@
 import { defaultKeymap, history, historyKeymap, indentWithTab } from "@codemirror/commands";
-import { markdown } from "@codemirror/lang-markdown";
+import { markdown, markdownLanguage } from "@codemirror/lang-markdown";
 import { HighlightStyle, syntaxHighlighting } from "@codemirror/language";
-import { highlightSelectionMatches, search, searchKeymap } from "@codemirror/search";
+import { highlightSelectionMatches, openSearchPanel, search, searchKeymap } from "@codemirror/search";
 import { EditorState } from "@codemirror/state";
 import { drawSelection, EditorView, keymap, placeholder } from "@codemirror/view";
 import { tags as t } from "@lezer/highlight";
 import { useEffect, useImperativeHandle, useRef, type Ref } from "react";
+import { formatAt, link, setHeading, toggleInline, toggleList, toggleQuote, type FormatState, type MdCommand } from "@/lib/markdownCommands";
 
 const highlight = HighlightStyle.define([
   { tag: t.heading, fontWeight: "650", color: "rgb(var(--fg))" },
@@ -17,13 +18,14 @@ const highlight = HighlightStyle.define([
   { tag: [t.link, t.url], color: "rgb(var(--accent))" },
   { tag: t.monospace, fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace", color: "rgb(var(--fg-2))" },
   { tag: [t.quote, t.contentSeparator], color: "rgb(var(--muted))" },
-  { tag: [t.processingInstruction, t.meta, t.list], color: "rgb(var(--muted))" },
+  // Marks (`#`, `-`, `>`, `**`) are processingInstruction; `t.list` would grey out whole list items.
+  { tag: [t.processingInstruction, t.meta], color: "rgb(var(--muted))" },
 ]);
 
 const theme = EditorView.theme({
   "&": { height: "100%", fontSize: "14px", backgroundColor: "transparent", color: "rgb(var(--fg))" },
   "&.cm-focused": { outline: "none" },
-  ".cm-scroller": { fontFamily: "inherit", lineHeight: "1.75", padding: "8px 0 40vh" },
+  ".cm-scroller": { fontFamily: "inherit", lineHeight: "1.75", padding: "16px 0 40vh" },
   ".cm-content": { maxWidth: "820px", padding: "0 24px", caretColor: "rgb(var(--fg))" },
   ".cm-cursor": { borderLeftColor: "rgb(var(--fg))" },
   "&.cm-focused .cm-selectionBackground, .cm-selectionBackground, ::selection": { backgroundColor: "rgb(var(--brand) / 0.22) !important" },
@@ -33,8 +35,37 @@ const theme = EditorView.theme({
   ".cm-placeholder": { color: "rgb(var(--faint))" },
 });
 
-/** What the editor page does to the text besides typing: image uploads in progress. */
+/** A toolbar edit as a key binding. */
+const bind = (key: string, cmd: MdCommand) => ({
+  key,
+  preventDefault: true,
+  run: (v: EditorView) => {
+    const spec = cmd(v.state);
+    if (spec) v.dispatch({ ...spec, scrollIntoView: true });
+    return true;
+  },
+});
+
+/** Typora's and Google Docs' shortcuts, which writers already know. */
+const FORMAT_KEYS = [
+  bind("Mod-b", toggleInline("strong")),
+  bind("Mod-i", toggleInline("emphasis")),
+  bind("Mod-Shift-x", toggleInline("strike")),
+  bind("Mod-e", toggleInline("code")),
+  bind("Mod-k", link),
+  bind("Mod-0", setHeading(0)),
+  ...[1, 2, 3, 4].map((n) => bind(`Mod-${n}`, setHeading(n))),
+  bind("Mod-Shift-7", toggleList("ordered")),
+  bind("Mod-Shift-8", toggleList("bullet")),
+  bind("Mod-Shift-9", toggleList("task")),
+  bind("Mod-Shift-.", toggleQuote),
+];
+
+/** What the editor page does to the text besides typing: the toolbar, image uploads in progress. */
 export interface EditorHandle {
+  /** Applies a toolbar edit and puts the focus back in the text. */
+  run: (cmd: MdCommand) => void;
+  openSearch: () => void;
   /** Inserts text at the cursor (on a line of its own) and focuses the editor. */
   insert: (text: string) => void;
   /** Replaces the first occurrence of `from`; false when it is gone (deleted meanwhile). */
@@ -47,6 +78,8 @@ interface MarkdownEditorProps {
   onSave: () => void;
   /** Image files pasted into the editor. */
   onPasteImages?: (files: File[]) => void;
+  /** The formatting at the cursor, whenever it may have changed. */
+  onFormat?: (format: FormatState) => void;
   handle?: Ref<EditorHandle>;
 }
 
@@ -54,15 +87,25 @@ interface MarkdownEditorProps {
  * CodeMirror 6 for the post body. The text is the editor's own after mounting; a `value` that
  * differs from it (a reload from disk) replaces it.
  */
-export function MarkdownEditor({ value, onChange, onSave, onPasteImages, handle }: MarkdownEditorProps) {
+export function MarkdownEditor({ value, onChange, onSave, onPasteImages, onFormat, handle }: MarkdownEditorProps) {
   const host = useRef<HTMLDivElement>(null);
   const view = useRef<EditorView | null>(null);
-  const handlers = useRef({ onChange, onSave, onPasteImages });
-  handlers.current = { onChange, onSave, onPasteImages };
+  const handlers = useRef({ onChange, onSave, onPasteImages, onFormat });
+  handlers.current = { onChange, onSave, onPasteImages, onFormat };
 
   useImperativeHandle(
     handle,
     () => ({
+      run: (cmd) => {
+        const v = view.current;
+        if (!v) return;
+        const spec = cmd(v.state);
+        if (spec) v.dispatch({ ...spec, scrollIntoView: true });
+        v.focus();
+      },
+      openSearch: () => {
+        if (view.current) openSearchPanel(view.current);
+      },
       insert: (text) => {
         const v = view.current;
         if (!v) return;
@@ -98,12 +141,13 @@ export function MarkdownEditor({ value, onChange, onSave, onPasteImages, handle 
           highlightSelectionMatches(),
           keymap.of([
             { key: "Mod-s", preventDefault: true, run: () => (handlers.current.onSave(), true) },
+            ...FORMAT_KEYS,
             ...defaultKeymap,
             ...historyKeymap,
             ...searchKeymap,
             indentWithTab,
           ]),
-          markdown(),
+          markdown({ base: markdownLanguage }),
           syntaxHighlighting(highlight),
           EditorView.lineWrapping,
           placeholder("正文…"),
@@ -119,11 +163,13 @@ export function MarkdownEditor({ value, onChange, onSave, onPasteImages, handle 
           }),
           EditorView.updateListener.of((u) => {
             if (u.docChanged) handlers.current.onChange(u.state.doc.toString());
+            if (u.docChanged || u.selectionSet) handlers.current.onFormat?.(formatAt(u.state));
           }),
         ],
       }),
     });
     view.current = v;
+    handlers.current.onFormat?.(formatAt(v.state));
     return () => v.destroy();
     // Created once; later values arrive through the effect below.
     // eslint-disable-next-line react-hooks/exhaustive-deps
