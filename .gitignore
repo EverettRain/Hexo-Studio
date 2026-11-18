@@ -1,0 +1,23 @@
+app/node_modules/
+app/dist/
+app/src-tauri/target/
+app/src-tauri/gen/
+
+# macOS
+.DS_Store
+._*
+
+# Editors
+.vscode/
+.idea/
+*.swp
+*~
+
+*.log
+*.tsbuildinfo
+
+# Updater signing keys. The private key goes to the TAURI_SIGNING_PRIVATE_KEY secret, never into git.
+signing/
+
+# Local reference material (the image checklist etc.), not part of the project.
+references/

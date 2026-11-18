@@ -1,0 +1,57 @@
+[package]
+name = "hexo-studio"
+version = "0.1.0"
+description = "Hexo-Studio - write, preview and deploy a Hexo blog on macOS"
+edition = "2021"
+rust-version = "1.95"
+
+[lib]
+name = "hexo_studio_lib"
+crate-type = ["staticlib", "rlib"]
+doctest = false
+
+[build-dependencies]
+tauri-build = { version = "2.7", features = [] }
+
+[dependencies]
+tauri = { version = "2.12", features = [] }
+tauri-plugin-single-instance = "2"
+tauri-plugin-opener = "2"
+# Folder picker for the blog directory and the Node executable.
+tauri-plugin-dialog = "2"
+# Checks GitHub Releases for a newer version (see docs/design.md, section 13).
+tauri-plugin-updater = "2"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+# Fetches preview pages from the local `hexo server` (plain HTTP). The updater turns on reqwest's
+# rustls without a crypto provider for every client, so one is installed at start-up, as the
+# updater itself does: ring, as in Mihomo-Monitor.
+reqwest = { version = "0.13", default-features = false }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+tokio = { version = "1", features = ["time", "sync", "rt", "macros"] }
+jiff = "1"
+yaml-rust2 = "0.13"
+url = "2"
+libc = "0.2"
+# Object stores (Aliyun OSS, S3-compatible) behind one interface; requests signed by its reqsign.
+opendal = { version = "0.59", default-features = false, features = ["services-oss", "services-s3", "executors-tokio", "layers-retry", "layers-timeout"] }
+# OpenDAL's requests go through reqwest (the same version and TLS setup as the rest of the app).
+opendal-http-transport-reqwest = { version = "0.59", default-features = false, features = ["rustls-no-provider"] }
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp", "tiff"] }
+# Lossy WebP (the image crate only writes lossless), through libwebp.
+webp = "0.3"
+# Quits through the normal exit path on SIGTERM / SIGINT / SIGHUP, so the preview server stops.
+signal-hook = "0.3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", features = ["apple-native"] }
+
+[dev-dependencies]
+tempfile = "3"
+
+[profile.release]
+codegen-units = 1
+lto = "thin"
+opt-level = "s"
+panic = "unwind"
+strip = "symbols"

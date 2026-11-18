@@ -1,0 +1,61 @@
+name: Publish release
+
+# Pushing a tag vX.Y.Z (the version in tauri.conf.json) builds the macOS app and publishes it with
+# latest.json, which the app's update check reads (docs/design.md, section 13).
+on:
+  push:
+    tags: ['v*']
+permissions:
+  contents: write
+jobs:
+  release:
+    # Hosted Apple Silicon runners often go unassigned for lack of capacity; the Intel image
+    # cross-compiles for Apple Silicon reliably (as in Mihomo-Monitor).
+    runs-on: macos-15-intel
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.7.0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: app/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: '1.95'
+          targets: aarch64-apple-darwin
+      - name: Verify release version
+        run: |
+          version=$(node -p "require('./app/src-tauri/tauri.conf.json').version")
+          [ "$GITHUB_REF_NAME" = "v$version" ] || { echo "Tag $GITHUB_REF_NAME does not match version $version"; exit 1; }
+      - name: Release notes
+        id: notes
+        # Hand-written per release: docs/releases/<tag>.md. The update check shows them.
+        run: |
+          {
+            echo 'body<<NOTES_EOF'
+            cat "docs/releases/$GITHUB_REF_NAME.md"
+            echo 'NOTES_EOF'
+          } >> "$GITHUB_OUTPUT"
+      - run: pnpm install --frozen-lockfile
+        working-directory: app
+      - run: pnpm typecheck && pnpm test
+        working-directory: app
+      - run: cargo test --manifest-path src-tauri/Cargo.toml
+        working-directory: app
+      - uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        with:
+          projectPath: app
+          tagName: ${{ github.ref_name }}
+          releaseName: Hexo-Studio ${{ github.ref_name }}
+          releaseBody: ${{ steps.notes.outputs.body }}
+          releaseDraft: false
+          prerelease: false
+          args: --target aarch64-apple-darwin --bundles app,dmg
+          includeUpdaterJson: true
