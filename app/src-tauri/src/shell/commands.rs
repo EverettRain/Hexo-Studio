@@ -4,7 +4,7 @@ use crate::domain::catalog::{self, ChecklistRow, Image, Mirror};
 use crate::domain::config::Deployer;
 use crate::domain::image_key::Format;
 use crate::domain::permalink;
-use crate::domain::source::{Commit, Status as SourceStatus};
+use crate::domain::source::{Commit, CommitDetail, Status as SourceStatus};
 use crate::domain::storage::Storage;
 use crate::domain::task::Task;
 use crate::infra::blog::{self, Blog, PostFile, PostSummary, WriteOutcome};
@@ -365,57 +365,51 @@ pub async fn blog_git_changes(ws: Ws<'_>) -> Result<Option<usize>, String> {
 
 // ---- source repository --------------------------------------------------------------------
 
-const SOURCE_LOG: usize = 30;
+/// Commits per page of the history.
+const SOURCE_PAGE: usize = 30;
 
-#[derive(Serialize)]
-#[serde(rename_all = "camelCase")]
-pub struct SourceView {
-    status: SourceStatus,
-    /// Newest first; the first `status.ahead` of them are not on the remote yet.
-    commits: Vec<Commit>,
+/// git only needs a `PATH`: a blog on a Mac without Node still has a repository to commit.
+fn git_path() -> std::ffi::OsString {
+    current_node().map(|e| e.path_var).unwrap_or_else(|_| "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin".into())
 }
 
-fn source_view(root: &Path) -> Result<SourceView, String> {
-    let env = current_node()?;
-    Ok(SourceView { status: git::status(root, &env)?, commits: git::log(root, &env, SOURCE_LOG)? })
-}
-
-/// The blog's own git repository: branch, changed files and recent commits.
+/// The blog's own git repository: branch, how it stands against its remote, changed files.
 #[tauri::command]
-pub async fn source_overview(ws: Ws<'_>) -> Result<SourceView, String> {
+pub async fn source_status(ws: Ws<'_>) -> Result<SourceStatus, String> {
     let root = project_root(&ws)?;
-    blocking(move || source_view(&root)).await
+    blocking(move || git::status(&root, &git_path())).await
 }
 
-/// Commits every change with `message`; returns the repository as it is afterwards.
+/// One page of the history, newest first, after the `skip` commits already shown.
 #[tauri::command]
-pub async fn source_commit(ws: Ws<'_>, message: String) -> Result<SourceView, String> {
+pub async fn source_commits(ws: Ws<'_>, skip: usize) -> Result<Vec<Commit>, String> {
     let root = project_root(&ws)?;
-    blocking(move || {
-        git::commit_all(&root, &current_node()?, &message)?;
-        source_view(&root)
-    })
-    .await
+    blocking(move || git::log(&root, &git_path(), skip, SOURCE_PAGE)).await
 }
 
 #[tauri::command]
-pub async fn source_push(ws: Ws<'_>) -> Result<SourceView, String> {
+pub async fn source_commit_detail(ws: Ws<'_>, hash: String) -> Result<CommitDetail, String> {
     let root = project_root(&ws)?;
-    blocking(move || {
-        git::push(&root, &current_node()?)?;
-        source_view(&root)
-    })
-    .await
+    blocking(move || git::commit_detail(&root, &git_path(), &hash)).await
+}
+
+/// Commits every change under `title` and an optional `body`.
+#[tauri::command]
+pub async fn source_commit(ws: Ws<'_>, title: String, body: String) -> Result<(), String> {
+    let root = project_root(&ws)?;
+    blocking(move || git::commit_all(&root, &git_path(), &title, &body)).await
 }
 
 #[tauri::command]
-pub async fn source_pull(ws: Ws<'_>) -> Result<SourceView, String> {
+pub async fn source_push(ws: Ws<'_>) -> Result<(), String> {
     let root = project_root(&ws)?;
-    blocking(move || {
-        git::pull(&root, &current_node()?)?;
-        source_view(&root)
-    })
-    .await
+    blocking(move || git::push(&root, &git_path())).await
+}
+
+#[tauri::command]
+pub async fn source_pull(ws: Ws<'_>) -> Result<(), String> {
+    let root = project_root(&ws)?;
+    blocking(move || git::pull(&root, &git_path())).await
 }
 
 fn start_task(runner: &Arc<Runner>, blog: Blog, task: Task, on_done: impl FnOnce(RunRecord) + Send + 'static) -> Result<u64, String> {

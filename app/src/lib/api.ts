@@ -123,10 +123,20 @@ export interface SourceCommit {
   time: number;
 }
 
-export interface SourceView {
-  status: SourceStatus;
-  /** Newest first; the first `status.ahead` are not on the remote yet. */
-  commits: SourceCommit[];
+export interface SourceFile {
+  path: string;
+  from: string | null;
+  kind: ChangeKind;
+  /** Null for a binary file. */
+  added: number | null;
+  removed: number | null;
+}
+
+export interface SourceCommitDetail extends SourceCommit {
+  email: string;
+  /** The message after its title line. */
+  body: string;
+  files: SourceFile[];
 }
 
 export type Task =
@@ -324,10 +334,13 @@ export const api = {
   previewProbe: (path: string) => invoke<PageProbe>("preview_probe", { path }),
   previewAwaitChange: (path: string, before: PageProbe | null) => invoke<PageProbe>("preview_await_change", { path, before }),
   blogGitChanges: () => invoke<number | null>("blog_git_changes"),
-  sourceOverview: () => invoke<SourceView>("source_overview"),
-  sourceCommit: (message: string) => invoke<SourceView>("source_commit", { message }),
-  sourcePush: () => invoke<SourceView>("source_push"),
-  sourcePull: () => invoke<SourceView>("source_pull"),
+  sourceStatus: () => invoke<SourceStatus>("source_status"),
+  /** One page of the history, newest first, after the `skip` commits already loaded. */
+  sourceCommits: (skip: number) => invoke<SourceCommit[]>("source_commits", { skip }),
+  sourceCommitDetail: (hash: string) => invoke<SourceCommitDetail>("source_commit_detail", { hash }),
+  sourceCommit: (title: string, body: string) => invoke<void>("source_commit", { title, body }),
+  sourcePush: () => invoke<void>("source_push"),
+  sourcePull: () => invoke<void>("source_pull"),
   runTask: (task: Task) => invoke<number>("run_task", { task }),
   runTaskAndWait: (task: Task) => invoke<Run>("run_task_and_wait", { task }),
   cancelRun: () => invoke<void>("cancel_run"),

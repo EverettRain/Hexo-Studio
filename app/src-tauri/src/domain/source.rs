@@ -123,6 +123,94 @@ pub fn parse_log(output: &str) -> Vec<Commit> {
         .collect()
 }
 
+/// One file of a commit, with its line counts (`None` for a binary file).
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FileChange {
+    pub path: String,
+    pub from: Option<String>,
+    pub kind: ChangeKind,
+    pub added: Option<u32>,
+    pub removed: Option<u32>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CommitDetail {
+    #[serde(flatten)]
+    pub commit: Commit,
+    pub email: String,
+    /// The message after its title line, without the blank line between them.
+    pub body: String,
+    pub files: Vec<FileChange>,
+}
+
+/// Format for `git show -s`: the fields `parse_commit_detail` reads. The body comes last, so
+/// newlines inside it cannot be mistaken for a separator.
+pub const DETAIL_FORMAT: &str = "--format=%H%x1f%an%x1f%ae%x1f%ct%x1f%s%x1f%b";
+
+/// `git show --name-status -z`: `M\0path\0`, a rename or copy `R100\0old\0new\0`.
+fn parse_name_status(output: &str) -> Vec<(ChangeKind, String, Option<String>)> {
+    let mut parts = output.split('\0').filter(|p| !p.is_empty());
+    let mut files = Vec::new();
+    while let Some(code) = parts.next() {
+        let letter = code.chars().next().unwrap_or('M');
+        if letter == 'R' || letter == 'C' {
+            let (Some(from), Some(to)) = (parts.next(), parts.next()) else { break };
+            let kind = if letter == 'R' { ChangeKind::Renamed } else { ChangeKind::Added };
+            files.push((kind, to.to_string(), Some(from.to_string())));
+        } else {
+            let Some(path) = parts.next() else { break };
+            let kind = match letter {
+                'A' => ChangeKind::Added,
+                'D' => ChangeKind::Deleted,
+                'U' => ChangeKind::Conflicted,
+                _ => ChangeKind::Modified,
+            };
+            files.push((kind, path.to_string(), None));
+        }
+    }
+    files
+}
+
+/// `git show --numstat -z`: `12\t3\tpath\0`, a rename `1\t0\t\0old\0new\0`, `-\t-\t` for binary.
+fn parse_numstat(output: &str) -> std::collections::HashMap<String, (Option<u32>, Option<u32>)> {
+    let mut counts = std::collections::HashMap::new();
+    let mut parts = output.split('\0').filter(|p| !p.is_empty());
+    while let Some(entry) = parts.next() {
+        let mut f = entry.splitn(3, '\t');
+        let (Some(added), Some(removed), Some(path)) = (f.next(), f.next(), f.next()) else { continue };
+        let path = if path.is_empty() {
+            let (_old, Some(new)) = (parts.next(), parts.next()) else { break };
+            new
+        } else {
+            path
+        };
+        counts.insert(path.to_string(), (added.parse().ok(), removed.parse().ok()));
+    }
+    counts
+}
+
+/// A commit from the three outputs `infra::git::commit_detail` collects.
+pub fn parse_commit_detail(header: &str, name_status: &str, numstat: &str) -> Option<CommitDetail> {
+    let mut f = header.splitn(6, '\u{1f}');
+    let (hash, author, email, time, subject, body) = (f.next()?, f.next()?, f.next()?, f.next()?, f.next()?, f.next().unwrap_or(""));
+    let counts = parse_numstat(numstat);
+    let files = parse_name_status(name_status)
+        .into_iter()
+        .map(|(kind, path, from)| {
+            let (added, removed) = counts.get(&path).copied().unwrap_or((None, None));
+            FileChange { path, from, kind, added, removed }
+        })
+        .collect();
+    Some(CommitDetail {
+        commit: Commit { hash: hash.to_string(), subject: subject.to_string(), author: author.to_string(), time: time.parse().ok()? },
+        email: email.to_string(),
+        body: body.trim().to_string(),
+        files,
+    })
+}
+
 /// What a failed git command means for the person using the source page; unknown failures show
 /// git's own message.
 pub fn explain_failure(stderr: &str) -> String {
@@ -147,6 +235,41 @@ pub fn explain_failure(stderr: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_commit_detail_joins_status_and_line_counts_by_path() {
+        // Arrange
+        let header = "abc\u{1f}Extra.#Flame\u{1f}e@x.com\u{1f}1763400000\u{1f}标题\u{1f}第一段\n\n第二段\n";
+        let status = "M\0a.md\0A\0新 文件.md\0R100\0old.md\0new.md\0D\0gone.png\0";
+        let numstat = "3\t1\ta.md\0-\t-\t新 文件.md\0\0";
+        let numstat = format!("{numstat}0\t0\t\0old.md\0new.md\0");
+
+        // Act
+        let d = parse_commit_detail(header, status, &numstat).unwrap();
+
+        // Assert
+        assert_eq!((d.commit.subject.as_str(), d.body.as_str(), d.email.as_str()), ("标题", "第一段\n\n第二段", "e@x.com"));
+        let files: Vec<_> = d.files.iter().map(|f| (f.path.as_str(), f.kind, f.added, f.removed)).collect();
+        assert_eq!(
+            files,
+            vec![
+                ("a.md", ChangeKind::Modified, Some(3), Some(1)),
+                ("新 文件.md", ChangeKind::Added, None, None),
+                ("new.md", ChangeKind::Renamed, Some(0), Some(0)),
+                ("gone.png", ChangeKind::Deleted, None, None),
+            ]
+        );
+        assert_eq!(d.files[2].from.as_deref(), Some("old.md"));
+    }
+
+    #[test]
+    fn a_commit_without_a_body_has_an_empty_one() {
+        // Act
+        let d = parse_commit_detail("abc\u{1f}n\u{1f}e\u{1f}5\u{1f}只有标题\u{1f}", "", "").unwrap();
+
+        // Assert
+        assert_eq!((d.body.as_str(), d.files.len()), ("", 0));
+    }
 
     #[test]
     fn explains_the_failures_people_actually_hit() {

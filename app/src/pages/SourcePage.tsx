@@ -1,12 +1,14 @@
 import { AlertTriangle, ArrowDownToLine, ArrowUpFromLine, GitBranch, GitCommitHorizontal, Loader2, RefreshCw } from "lucide-react";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
-import { Textarea } from "@/components/ui/input";
+import { Input, Textarea } from "@/components/ui/input";
 import { useToast } from "@/components/ui/toast";
-import { api, errorText, type ChangeKind, type SourceView } from "@/lib/api";
+import { api, errorText, type ChangeKind, type SourceCommit, type SourceCommitDetail, type SourceStatus } from "@/lib/api";
 import { useOnShow } from "@/lib/pageActive";
 import { cn } from "@/lib/utils";
+
+const PAGE = 30;
 
 const kindBadge: Record<ChangeKind, { letter: string; label: string; className: string }> = {
   added: { letter: "A", label: "新增", className: "text-ok" },
@@ -17,12 +19,28 @@ const kindBadge: Record<ChangeKind, { letter: string; label: string; className: 
   conflicted: { letter: "!", label: "冲突", className: "text-danger" },
 };
 
-function when(seconds: number): string {
-  return new Date(seconds * 1000).toLocaleString("zh-CN", { hour12: false, month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit" });
+function Badge({ kind }: { kind: ChangeKind }) {
+  const b = kindBadge[kind];
+  return (
+    <span title={b.label} className={cn("w-3 shrink-0 text-center font-mono font-semibold", b.className)}>
+      {b.letter}
+    </span>
+  );
+}
+
+function when(seconds: number, long = false): string {
+  return new Date(seconds * 1000).toLocaleString("zh-CN", {
+    hour12: false,
+    ...(long ? { year: "numeric" } : {}),
+    month: "numeric",
+    day: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 /** Where the branch stands against its remote, in words. */
-function tracking(s: SourceView["status"]): string {
+function tracking(s: SourceStatus): string {
   if (!s.branch) return "不在任何分支上（HEAD 游离）";
   if (!s.upstream) return "还没有推送到远程";
   if (s.upstreamGone) return `${s.upstream} 在远程上不存在`;
@@ -30,84 +48,222 @@ function tracking(s: SourceView["status"]): string {
   return [s.ahead > 0 && `领先 ${s.upstream} ${s.ahead} 个提交`, s.behind > 0 && `落后 ${s.behind} 个提交`].filter(Boolean).join("，");
 }
 
-/** The blog's own git repository (its sources, not the deploy repository): commit and push. */
-export function SourcePage() {
-  const toast = useToast();
-  const [view, setView] = useState<SourceView | null>(null);
+/** A commit's message and the files it changed, read when it is opened. */
+function CommitDialog({ commit, unpushed, onClose }: { commit: SourceCommit | null; unpushed: boolean; onClose: () => void }) {
+  const [detail, setDetail] = useState<SourceCommitDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const [message, setMessage] = useState("");
-  const [busy, setBusy] = useState<"commit" | "push" | "pull" | null>(null);
-  const [confirmPush, setConfirmPush] = useState(false);
-
-  const refresh = useCallback(async () => {
-    try {
-      setView(await api.sourceOverview());
-      setError(null);
-    } catch (e) {
-      setError(errorText(e));
-    }
-  }, []);
+  const hash = commit?.hash;
 
   useEffect(() => {
-    void refresh();
-  }, [refresh]);
-  useOnShow(() => void refresh());
+    setDetail(null);
+    setError(null);
+    if (!hash) return;
+    let alive = true;
+    api.sourceCommitDetail(hash).then(
+      (d) => alive && setDetail(d),
+      (e) => alive && setError(errorText(e)),
+    );
+    return () => {
+      alive = false;
+    };
+  }, [hash]);
 
-  const act = async (kind: "commit" | "push" | "pull", run: () => Promise<SourceView>, done: string) => {
+  const totals = detail?.files.reduce((t, f) => ({ added: t.added + (f.added ?? 0), removed: t.removed + (f.removed ?? 0) }), { added: 0, removed: 0 });
+
+  return (
+    <Dialog
+      open={commit !== null}
+      onClose={onClose}
+      title={commit?.subject ?? ""}
+      className="max-w-2xl"
+      description={
+        commit && (
+          <span className="flex flex-wrap items-center gap-x-1.5">
+            <span className="selectable font-mono">{commit.hash.slice(0, 10)}</span>·<span>{commit.author}</span>·<span>{when(commit.time, true)}</span>
+            {unpushed && <span className="rounded bg-warn-soft px-1.5 text-warn">未推送</span>}
+          </span>
+        )
+      }
+      footer={
+        <Button variant="outline" onClick={onClose}>
+          关闭
+        </Button>
+      }
+    >
+      {error ? (
+        <div className="selectable whitespace-pre-wrap text-[12.5px] text-danger">{error}</div>
+      ) : !detail ? (
+        <div className="flex items-center gap-2 py-6 text-[13px] text-muted">
+          <Loader2 className="h-4 w-4 animate-spin" />
+          正在读取…
+        </div>
+      ) : (
+        <div className="space-y-3">
+          {detail.body && <div className="selectable whitespace-pre-wrap text-[13px] leading-6">{detail.body}</div>}
+          <div>
+            <div className="group-label pb-1">
+              {detail.files.length} 个文件
+              {totals && (
+                <span className="ml-2 font-mono normal-case">
+                  <span className="text-ok">+{totals.added}</span> <span className="text-danger">−{totals.removed}</span>
+                </span>
+              )}
+            </div>
+            <div className="selectable max-h-[320px] overflow-y-auto rounded-lg bg-card-2 py-1 shadow-card">
+              {detail.files.length === 0 && <div className="px-3 py-2 text-[12px] text-muted">没有文件改动（空提交或合并）</div>}
+              {detail.files.map((f) => (
+                <div key={f.path} className="flex items-baseline gap-2.5 px-3 py-[3px] text-[12px] leading-5">
+                  <Badge kind={f.kind} />
+                  <span className="min-w-0 flex-1 break-all font-mono text-fg-2">
+                    {f.path}
+                    {f.from && <span className="text-muted"> ← {f.from}</span>}
+                  </span>
+                  <span className="shrink-0 font-mono text-[11.5px]">
+                    {f.added === null ? (
+                      <span className="text-muted">二进制</span>
+                    ) : (
+                      <>
+                        <span className="text-ok">+{f.added}</span> <span className="text-danger">−{f.removed}</span>
+                      </>
+                    )}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+    </Dialog>
+  );
+}
+
+/**
+ * The blog's own git repository (its sources, not the deploy repository): commit and push.
+ * Nothing waits for git before the page appears: the status and the history load on their own,
+ * what is already shown stays while it reads again, and a commit's details are read when opened.
+ */
+export function SourcePage() {
+  const toast = useToast();
+  const [status, setStatus] = useState<SourceStatus | null>(null);
+  const [commits, setCommits] = useState<SourceCommit[] | null>(null);
+  const [hasMore, setHasMore] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [reading, setReading] = useState(0);
+  const [moreBusy, setMoreBusy] = useState(false);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [busy, setBusy] = useState<"commit" | "push" | "pull" | null>(null);
+  const [confirmPush, setConfirmPush] = useState(false);
+  const [open, setOpen] = useState<SourceCommit | null>(null);
+  // Only the newest read may update the page; an older one that ends later is dropped.
+  const generation = useRef(0);
+
+  const refresh = useCallback(() => {
+    const mine = ++generation.current;
+    const current = () => mine === generation.current;
+    setReading((n) => n + 2);
+    const done = () => setReading((n) => n - 1);
+    api.sourceStatus().then(
+      (s) => {
+        if (current()) {
+          setStatus(s);
+          setError(null);
+        }
+      },
+      (e) => current() && setError(errorText(e)),
+    ).finally(done);
+    api.sourceCommits(0).then(
+      (c) => {
+        if (current()) {
+          setCommits(c);
+          setHasMore(c.length === PAGE);
+        }
+      },
+      () => {},
+    ).finally(done);
+  }, []);
+
+  useEffect(() => refresh(), [refresh]);
+  useOnShow(refresh);
+
+  const loadMore = async () => {
+    if (!commits) return;
+    const mine = generation.current;
+    setMoreBusy(true);
+    try {
+      const next = await api.sourceCommits(commits.length);
+      if (mine !== generation.current) return;
+      setCommits([...commits, ...next]);
+      setHasMore(next.length === PAGE);
+    } catch (e) {
+      toast(errorText(e), "error");
+    } finally {
+      setMoreBusy(false);
+    }
+  };
+
+  const act = async (kind: "commit" | "push" | "pull", run: () => Promise<void>, done: string) => {
     setBusy(kind);
     try {
-      setView(await run());
-      setError(null);
+      await run();
       toast(done, "success");
       return true;
     } catch (e) {
       toast(errorText(e), "error");
-      void refresh();
       return false;
     } finally {
       setBusy(null);
+      refresh();
     }
   };
 
-  if (error && !view) {
+  const commit = () => void act("commit", () => api.sourceCommit(title, body), "已提交").then((ok) => ok && (setTitle(""), setBody("")));
+
+  if (error && !status) {
     return <div className="flex h-full items-center justify-center px-8 text-center text-[13px] leading-6 text-fg-2">{error.includes("not a git repository") ? "这个博客文件夹不是 git 仓库。" : error}</div>;
   }
-  if (!view) return null;
 
-  const { status, commits } = view;
-  const conflicted = status.changes.some((c) => c.kind === "conflicted");
-  const canCommit = status.changes.length > 0 && message.trim() !== "" && !conflicted && busy === null;
-  const needsPush = status.ahead > 0 || !status.upstream || status.upstreamGone;
-  const canPush = !!status.branch && needsPush && status.behind === 0 && commits.length > 0 && busy === null;
-  const target = status.upstream && !status.upstreamGone ? status.upstream : `origin/${status.branch}`;
+  const conflicted = status?.changes.some((c) => c.kind === "conflicted") ?? false;
+  const canCommit = !!status && status.changes.length > 0 && title.trim() !== "" && !conflicted && busy === null;
+  const needsPush = !!status && (status.ahead > 0 || !status.upstream || status.upstreamGone);
+  const canPush = !!status?.branch && needsPush && status.behind === 0 && (commits?.length ?? 0) > 0 && busy === null;
+  const target = status && status.upstream && !status.upstreamGone ? status.upstream : `origin/${status?.branch}`;
+  const ahead = status?.ahead ?? 0;
+  const openIndex = open ? (commits?.findIndex((c) => c.hash === open.hash) ?? -1) : -1;
 
   return (
     <div className="flex h-full min-h-0 flex-col px-5 pb-5">
       <div className="flex shrink-0 items-center gap-2 pb-4 pt-1">
         <div className="flex min-w-0 flex-1 items-center gap-2 text-[12.5px] leading-5 text-fg-2">
           <GitBranch className="h-4 w-4 shrink-0 text-muted" />
-          <span className="font-mono text-[13px] font-medium text-fg">{status.branch ?? "HEAD"}</span>
-          <span className="truncate">{tracking(status)}</span>
+          {status ? (
+            <>
+              <span className="font-mono text-[13px] font-medium text-fg">{status.branch ?? "HEAD"}</span>
+              <span className="truncate">{tracking(status)}</span>
+            </>
+          ) : (
+            <span className="text-muted">正在读取…</span>
+          )}
         </div>
-        <Button variant="ghost" size="icon" title="重新读取" disabled={busy !== null} onClick={() => void refresh()}>
-          <RefreshCw />
+        <Button variant="ghost" size="icon" title="重新读取" disabled={busy !== null} onClick={refresh}>
+          <RefreshCw className={cn(reading > 0 && "animate-spin")} />
         </Button>
         <Button
           variant="outline"
-          disabled={!status.upstream || status.upstreamGone || busy !== null}
+          disabled={!status?.upstream || status.upstreamGone || busy !== null}
           title="git pull --ff-only：只接受快进，不产生合并提交"
           onClick={() => void act("pull", api.sourcePull, "已拉取")}
         >
           {busy === "pull" ? <Loader2 className="animate-spin" /> : <ArrowDownToLine />}
-          拉取{status.behind > 0 ? `（${status.behind}）` : ""}
+          拉取{status && status.behind > 0 ? `（${status.behind}）` : ""}
         </Button>
         <Button variant="brand" disabled={!canPush} onClick={() => setConfirmPush(true)}>
           {busy === "push" ? <Loader2 className="animate-spin" /> : <ArrowUpFromLine />}
-          推送{status.ahead > 0 ? `（${status.ahead}）` : ""}
+          推送{ahead > 0 ? `（${ahead}）` : ""}
         </Button>
       </div>
 
-      {status.behind > 0 && (
+      {status && status.behind > 0 && (
         <div className="mb-3 flex gap-2 rounded-lg bg-warn-soft px-3 py-2 text-[12.5px] leading-5 text-warn">
           <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
           远程有 {status.behind} 个本地还没有的提交，先拉取再推送。
@@ -122,16 +278,19 @@ export function SourcePage() {
 
       <div className="flex min-h-0 flex-1 gap-4">
         <section className="flex min-w-0 flex-1 flex-col gap-3">
-          <div className="group-label">改动（{status.changes.length}）</div>
+          <div className="group-label">改动{status ? `（${status.changes.length}）` : ""}</div>
           <div className="selectable min-h-0 flex-1 overflow-y-auto rounded-lg bg-card-2 py-1 shadow-card">
-            {status.changes.length === 0 ? (
+            {!status ? (
+              <div className="flex h-full items-center justify-center gap-2 text-[13px] text-muted">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                正在读取…
+              </div>
+            ) : status.changes.length === 0 ? (
               <div className="flex h-full items-center justify-center text-[13px] text-muted">没有未提交的改动</div>
             ) : (
               status.changes.map((c) => (
                 <div key={c.path} className="flex items-baseline gap-2.5 px-3 py-[3px] text-[12px] leading-5">
-                  <span title={kindBadge[c.kind].label} className={cn("w-3 shrink-0 text-center font-mono font-semibold", kindBadge[c.kind].className)}>
-                    {kindBadge[c.kind].letter}
-                  </span>
+                  <Badge kind={c.kind} />
                   <span className="min-w-0 break-all font-mono text-fg-2">
                     {c.path}
                     {c.from && <span className="text-muted"> ← {c.from}</span>}
@@ -140,24 +299,36 @@ export function SourcePage() {
               ))
             )}
           </div>
-          <Textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            placeholder="提交说明，第一行是标题，例如：新文章《…》"
-            className="shrink-0 font-sans text-[13px]"
-            onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && canCommit) {
-                e.preventDefault();
-                void act("commit", () => api.sourceCommit(message), "已提交").then((ok) => ok && setMessage(""));
-              }
-            }}
-          />
+          <div className="shrink-0 space-y-2">
+            <Input
+              value={title}
+              onChange={(e) => setTitle(e.target.value.replace(/[\r\n]+/g, " "))}
+              placeholder="标题，例如：新文章《…》"
+              aria-label="提交标题"
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && canCommit) {
+                  e.preventDefault();
+                  commit();
+                }
+              }}
+            />
+            <Textarea
+              value={body}
+              onChange={(e) => setBody(e.target.value)}
+              placeholder="说明（可选）：改了什么、为什么"
+              aria-label="提交说明"
+              className="min-h-[64px] font-sans text-[13px]"
+              onKeyDown={(e) => {
+                if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && canCommit) {
+                  e.preventDefault();
+                  commit();
+                }
+              }}
+            />
+          </div>
           <div className="flex shrink-0 items-center justify-between gap-2">
             <span className="text-[11.5px] text-muted">会提交列出的全部改动（含新文件）。⌘↵ 提交。</span>
-            <Button
-              disabled={!canCommit}
-              onClick={() => void act("commit", () => api.sourceCommit(message), "已提交").then((ok) => ok && setMessage(""))}
-            >
+            <Button disabled={!canCommit} onClick={commit}>
               {busy === "commit" ? <Loader2 className="animate-spin" /> : <GitCommitHorizontal />}
               提交全部改动
             </Button>
@@ -167,21 +338,35 @@ export function SourcePage() {
         <section className="flex w-[300px] shrink-0 flex-col gap-3">
           <div className="group-label">最近提交</div>
           <div className="min-h-0 flex-1 space-y-0.5 overflow-y-auto">
-            {commits.length === 0 && <div className="px-2 text-[13px] text-muted">还没有提交</div>}
-            {commits.map((c, i) => (
-              <div key={c.hash} className="rounded-[7px] px-2 py-1.5">
-                <div className="selectable text-[13px] leading-5">{c.subject}</div>
+            {commits === null && (
+              <div className="flex items-center gap-2 px-2 text-[13px] text-muted">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                正在读取…
+              </div>
+            )}
+            {commits?.length === 0 && <div className="px-2 text-[13px] text-muted">还没有提交</div>}
+            {commits?.map((c, i) => (
+              <button key={c.hash} onClick={() => setOpen(c)} className="block w-full rounded-[7px] px-2 py-1.5 text-left hover:bg-pill active:!scale-100">
+                <div className="line-clamp-2 text-[13px] leading-5">{c.subject}</div>
                 <div className="flex items-center gap-1.5 text-[11.5px] text-muted">
                   <span className="font-mono">{c.hash.slice(0, 7)}</span>
                   <span>·</span>
                   <span>{when(c.time)}</span>
-                  {i < status.ahead && <span className="rounded bg-warn-soft px-1.5 text-warn">未推送</span>}
+                  {i < ahead && <span className="rounded bg-warn-soft px-1.5 text-warn">未推送</span>}
                 </div>
-              </div>
+              </button>
             ))}
+            {hasMore && (
+              <Button variant="ghost" size="sm" className="w-full" disabled={moreBusy} onClick={() => void loadMore()}>
+                {moreBusy && <Loader2 className="animate-spin" />}
+                加载更多
+              </Button>
+            )}
           </div>
         </section>
       </div>
+
+      <CommitDialog commit={open} unpushed={openIndex >= 0 && openIndex < ahead} onClose={() => setOpen(null)} />
 
       <Dialog
         open={confirmPush}
@@ -189,8 +374,8 @@ export function SourcePage() {
         title="推送到远程？"
         description={
           <>
-            将把 <span className="font-mono">{status.branch}</span> 分支{status.ahead > 0 ? `的 ${status.ahead} 个提交` : ""}推送到 <span className="font-mono">{target}</span>
-            {status.upstream && !status.upstreamGone ? "" : "，并把它设为这个分支的上游"}。
+            将把 <span className="font-mono">{status?.branch}</span> 分支{ahead > 0 ? `的 ${ahead} 个提交` : ""}推送到 <span className="font-mono">{target}</span>
+            {status?.upstream && !status.upstreamGone ? "" : "，并把它设为这个分支的上游"}。
           </>
         }
         footer={
