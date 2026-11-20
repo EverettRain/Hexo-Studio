@@ -4,6 +4,7 @@ use crate::domain::catalog::{self, ChecklistRow, Image, Mirror};
 use crate::domain::config::Deployer;
 use crate::domain::image_key::Format;
 use crate::domain::permalink;
+use crate::domain::source::{Commit, Status as SourceStatus};
 use crate::domain::storage::Storage;
 use crate::domain::task::Task;
 use crate::infra::blog::{self, Blog, PostFile, PostSummary, WriteOutcome};
@@ -360,6 +361,61 @@ pub async fn preview_await_change(preview: Prev<'_>, path: String, before: Optio
 pub async fn blog_git_changes(ws: Ws<'_>) -> Result<Option<usize>, String> {
     let blog = current_blog(&ws)?;
     blocking(move || Ok(git::uncommitted(&blog.root, &current_node()?))).await
+}
+
+// ---- source repository --------------------------------------------------------------------
+
+const SOURCE_LOG: usize = 30;
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SourceView {
+    status: SourceStatus,
+    /// Newest first; the first `status.ahead` of them are not on the remote yet.
+    commits: Vec<Commit>,
+}
+
+fn source_view(root: &Path) -> Result<SourceView, String> {
+    let env = current_node()?;
+    Ok(SourceView { status: git::status(root, &env)?, commits: git::log(root, &env, SOURCE_LOG)? })
+}
+
+/// The blog's own git repository: branch, changed files and recent commits.
+#[tauri::command]
+pub async fn source_overview(ws: Ws<'_>) -> Result<SourceView, String> {
+    let root = project_root(&ws)?;
+    blocking(move || source_view(&root)).await
+}
+
+/// Commits every change with `message`; returns the repository as it is afterwards.
+#[tauri::command]
+pub async fn source_commit(ws: Ws<'_>, message: String) -> Result<SourceView, String> {
+    let root = project_root(&ws)?;
+    blocking(move || {
+        git::commit_all(&root, &current_node()?, &message)?;
+        source_view(&root)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn source_push(ws: Ws<'_>) -> Result<SourceView, String> {
+    let root = project_root(&ws)?;
+    blocking(move || {
+        git::push(&root, &current_node()?)?;
+        source_view(&root)
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn source_pull(ws: Ws<'_>) -> Result<SourceView, String> {
+    let root = project_root(&ws)?;
+    blocking(move || {
+        git::pull(&root, &current_node()?)?;
+        source_view(&root)
+    })
+    .await
 }
 
 fn start_task(runner: &Arc<Runner>, blog: Blog, task: Task, on_done: impl FnOnce(RunRecord) + Send + 'static) -> Result<u64, String> {

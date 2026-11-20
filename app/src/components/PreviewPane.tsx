@@ -32,7 +32,7 @@ export function LogView({ lines, className }: { lines: LogLine[]; className?: st
 }
 
 /** The preview server's output, kept up to date while shown. */
-function usePreviewLog(enabled: boolean): LogLine[] {
+export function usePreviewLog(enabled: boolean): LogLine[] {
   const [lines, setLines] = useState<LogLine[]>([]);
   useEffect(() => {
     if (!enabled) return;

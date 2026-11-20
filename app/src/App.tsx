@@ -10,11 +10,13 @@ import { DeployPage } from "@/pages/DeployPage";
 import { EditorPage } from "@/pages/EditorPage";
 import { ImagesPage } from "@/pages/ImagesPage";
 import { PostsPage } from "@/pages/PostsPage";
+import { PreviewPage } from "@/pages/PreviewPage";
 import { SettingsPage } from "@/pages/SettingsPage";
+import { SourcePage } from "@/pages/SourcePage";
 import { WelcomePage } from "@/pages/WelcomePage";
 import { Plus } from "lucide-react";
 
-const titles: Record<PageId, string> = { posts: "文章", images: "图片", deploy: "部署", settings: "设置" };
+const titles: Record<PageId, string> = { posts: "文章", images: "图片", preview: "预览", source: "源码", deploy: "部署", settings: "设置" };
 
 /** The welcome page until a project is open, then the project's window. */
 export default function App() {
@@ -158,6 +160,12 @@ function ProjectWindow({ status, info, theme, onThemeChange, onStatus, onClose }
       </PageSlot>
       <PageSlot active={page === "images"}>
         <ImagesPage onOpenPost={(id) => void openPost(id)} />
+      </PageSlot>
+      <PageSlot active={page === "preview"}>
+        <PreviewPage preview={preview} />
+      </PageSlot>
+      <PageSlot active={page === "source"}>
+        <SourcePage />
       </PageSlot>
       <PageSlot active={page === "deploy"}>
         <DeployPage config={config} />

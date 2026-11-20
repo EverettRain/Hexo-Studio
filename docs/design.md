@@ -35,7 +35,7 @@
 
 | 子进程 | 生命周期 | 说明 |
 | --- | --- | --- |
-| 预览服务器 `hexo server --draft -p <空闲端口>` | 打开编辑器时启动、退出应用或执行部署前停止 | 长驻，日志流到前端“预览日志” |
+| 预览服务器 `hexo server --draft -p <空闲端口>` | 打开编辑器或在预览页点“启动”时启动，预览页点“停止”、退出应用或执行部署前停止 | 长驻，日志流到前端“预览日志” |
 | 一次性命令 `hexo clean` / `generate` / `deploy` / `new` / `publish` | 执行完即退出 | 标准输出 / 错误逐行通过 Tauri 事件推给前端 |
 
 - 所有子进程以独立进程组启动，停止时整组终止；应用退出时清理全部子进程，不留孤儿 `hexo server`。
@@ -198,6 +198,8 @@ front-matter 实际使用情况（25 篇文章统计，4 篇草稿字段相同�
 | 文章 | 文章 / 草稿两个分组，按日期排序，搜索标题与标签，新建 |
 | 编辑器 | 格式工具栏、可收起的文章信息、Markdown 编辑器、状态栏（行列、字数）、预览、保存状态、在 Finder / 默认编辑器中打开 |
 | 图片 | 存储配置（新建、编辑、切换、删除）与图库设置；图片库：浏览、搜索、筛选、详情编辑、上传、检查、删除、接管旧图、导入 / 导出清单 |
+| 预览 | 启动 / 停止 `hexo server --draft`、地址与在浏览器中打开、服务器日志（编辑器里的预览窗格与它是同一个服务器） |
+| 源码 | 博客源码仓库（不是部署仓库）：分支与远程的差距、未提交的改动、提交（全部改动）、推送、拉取（只接受快进）、最近提交 |
 | 部署 | 清理 / 生成 / 部署、实时日志、历史运行 |
 | 欢迎页 | 最近项目、打开文件夹、版本与更新 |
 | 设置 | 当前项目信息与关闭项目、Node 路径、外观、更新（图片存储改在图片页的存储配置里） |
@@ -208,17 +210,17 @@ CSP 需放行：`frame-src http://localhost:*`（预览）、`img-src` 加上 OS
 
 ```text
 app/
-  src/                      React：pages/（Welcome、Posts、Editor、Deploy、Settings）、components/、
+  src/                      React：pages/（Welcome、Posts、Editor、Preview、Source、Deploy、Settings）、components/、
                             lib/api.ts（invoke 与事件封装）、lib/frontmatter.ts（yaml Document 区间替换）、lib/date.ts、
                             lib/markdownCommands.ts（工具栏格式命令）
   src-tauri/src/
     domain/                 纯逻辑：config（_config.yml 字段）、post（front-matter 切分、列表字段、slug）、
                             permalink（按 permalink 模式 + 时区算路径）、task（Hexo 命令与互斥要求）、
-                            deploy_log（行级别与错误识别）、storage（存储提供方与公开地址）、
+                            deploy_log（行级别与错误识别）、source（git status / log 的读取、git 失败的说明）、storage（存储提供方与公开地址）、
                             image_key（uid、对象路径、输出格式）、catalog（图片库与清单 CSV）、
                             image_refs（找出与改写图片地址、使用情况、接管规划）
     infra/                  对外适配：blog（校验、文章读写与冲突检测）、project（.hexostudio/）、node_env（PATH 与 Node 发现）、
-                            hexo（子进程、进程组、逐行输出、残留清理）、git（未提交改动、origin）、settings、paths、
+                            hexo（子进程、进程组、逐行输出、残留清理）、git（状态、日志、提交、推送、拉取，未提交改动数、origin）、settings、paths、
                             store（OpenDAL）、keychain、image_encode（解码、缩放、WebP）
     service/                用例：preview（预览服务器生命周期与刷新判定）、runner（命令互斥、预览停启与运行记录）、
                             images（入库：母图、转换、上传；检查；删除）、adopt（接管旧图）
@@ -239,7 +241,8 @@ app/
 2+. ✅ **项目与更新**（检查更新的真实下载安装要等第一个 Release 发布后才能验证）：欢迎页与最近项目、`.hexostudio/` 目录、单窗口切换项目（第 1.1 节）；Tauri updater 检查更新，GitHub Release 发布流程（第 13 节）。
 3. ✅ **M3 图片上传**（阿里云 OSS 还没用真实 AccessKey 实测，见第 11 节）：存储提供方（阿里云 OSS、S3 兼容）的项目设置与钥匙串；拖拽 / 粘贴 / 选择文件上传并插入；默认转 WebP、可选原图；母图备份（第 6.1 节）。
 3+. ✅ **图片库**（阿里云 OSS 同样待真实 AccessKey 实测）：按项目统一管理、uid 对象名、`images.json`、图片页、文章里从图库取用、接管旧图、清单导入导出（第 6.2–6.4 节；取代 M3 时按页面分目录的路径与“旧图迁移”）。
-4. **M4 图片库与完善**：图片库浏览 / 搜索 / 删除 / 插入；未引用检测；封面从图片库选择；外部改动检测；（可选）即时 Markdown 预览、源码仓库 git 状态与提交。
+4. **M4 图片库与完善**：图片库浏览 / 搜索 / 删除 / 插入；未引用检测；封面从图片库选择；外部改动检测；（可选）即时 Markdown 预览。
+   - ✅ 已做：预览页（独立启停 `hexo server`）与源码页（git 状态、提交、推送、拉取）；见第 10 节“源码仓库”各条。
 
 ## 10. 已确认的决定
 
@@ -271,6 +274,9 @@ app/
 - （编辑器）文章信息放在文章开头、随正文滚走（不做浮动面板或下拉）；日期、标签、分类、选项全部自绘控件（第 4 节）。
 - （3+）多套存储配置放在图片页、成套切换；图片按地址归属配置，不在图库里另存配置 id（6.1 节）。
 - （编辑器）图片在编辑器里只显示为图片 + 名称，文件里仍写标准的地址（不引入自定义的“按名称引用”语法：那需要往博客里加渲染脚本，其他编辑器和 Hexo 本身也读不懂）；名称来自图片库，按地址（含接管前的旧地址）查找。
+- （源码仓库）源码页只管博客自己的仓库：提交一律是 `git add -A` 加 `git commit`（博客历史一直如此，不做逐文件暂存）；推送在确认框之后才执行，分支没有可用的上游时推到 `origin` 并设为上游；拉取固定 `--ff-only`，两边都有新提交时拒绝并提示去终端处理，应用里不做合并、变基、冲突解决。
+- （源码仓库）git 子进程不接终端、不弹口令（`GIT_TERMINAL_PROMPT=0`、无 stdin），放进独立进程组；提交类 30 秒、推送 / 拉取 120 秒超时，超时整组终止（ssh 等辅助进程握着输出管道，只杀 git 会一直等下去）。失败信息按常见情形翻成中文说明（没有提交者、被拒绝需先拉取、SSH 登录失败、GH013、仓库不存在），其余原样显示。
+- （源码仓库）读取走 `git status --porcelain=v1 -b -z`（路径不转义，中文文件名原样）；`domain/source.rs` 只解析文本。
 - （M3）WebP 用 `webp` crate（libwebp，有损）；`image` crate 只负责解码和缩放（它只能写无损 WebP）。
 
 ## 11. 开工前要实测的事项

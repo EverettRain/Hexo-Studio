@@ -97,6 +97,38 @@ export interface PageProbe {
   hash: string;
 }
 
+export type ChangeKind = "added" | "modified" | "deleted" | "renamed" | "untracked" | "conflicted";
+
+export interface SourceChange {
+  path: string;
+  from: string | null;
+  kind: ChangeKind;
+}
+
+export interface SourceStatus {
+  /** Null on a detached HEAD. */
+  branch: string | null;
+  upstream: string | null;
+  upstreamGone: boolean;
+  ahead: number;
+  behind: number;
+  changes: SourceChange[];
+}
+
+export interface SourceCommit {
+  hash: string;
+  subject: string;
+  author: string;
+  /** Unix seconds. */
+  time: number;
+}
+
+export interface SourceView {
+  status: SourceStatus;
+  /** Newest first; the first `status.ahead` are not on the remote yet. */
+  commits: SourceCommit[];
+}
+
 export type Task =
   | { kind: "clean" }
   | { kind: "generate" }
@@ -292,6 +324,10 @@ export const api = {
   previewProbe: (path: string) => invoke<PageProbe>("preview_probe", { path }),
   previewAwaitChange: (path: string, before: PageProbe | null) => invoke<PageProbe>("preview_await_change", { path, before }),
   blogGitChanges: () => invoke<number | null>("blog_git_changes"),
+  sourceOverview: () => invoke<SourceView>("source_overview"),
+  sourceCommit: (message: string) => invoke<SourceView>("source_commit", { message }),
+  sourcePush: () => invoke<SourceView>("source_push"),
+  sourcePull: () => invoke<SourceView>("source_pull"),
   runTask: (task: Task) => invoke<number>("run_task", { task }),
   runTaskAndWait: (task: Task) => invoke<Run>("run_task_and_wait", { task }),
   cancelRun: () => invoke<void>("cancel_run"),
