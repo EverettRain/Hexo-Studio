@@ -3,6 +3,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Textarea } from "@/components/ui/input";
+import { Segmented } from "@/components/ui/segmented";
 import { useToast } from "@/components/ui/toast";
 import { api, errorText, type ChangeKind, type SourceCommit, type SourceCommitDetail, type SourceStatus } from "@/lib/api";
 import { useOnShow } from "@/lib/pageActive";
@@ -48,16 +49,15 @@ function tracking(s: SourceStatus): string {
   return [s.ahead > 0 && `领先 ${s.upstream} ${s.ahead} 个提交`, s.behind > 0 && `落后 ${s.behind} 个提交`].filter(Boolean).join("，");
 }
 
-/** A commit's message and the files it changed, read when it is opened. */
-function CommitDialog({ commit, unpushed, onClose }: { commit: SourceCommit | null; unpushed: boolean; onClose: () => void }) {
+/** A commit's message and the files it changed, read when it is selected; shown in the changes box. */
+function CommitView({ commit, unpushed }: { commit: SourceCommit; unpushed: boolean }) {
   const [detail, setDetail] = useState<SourceCommitDetail | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const hash = commit?.hash;
+  const { hash } = commit;
 
   useEffect(() => {
     setDetail(null);
     setError(null);
-    if (!hash) return;
     let alive = true;
     api.sourceCommitDetail(hash).then(
       (d) => alive && setDetail(d),
@@ -71,69 +71,56 @@ function CommitDialog({ commit, unpushed, onClose }: { commit: SourceCommit | nu
   const totals = detail?.files.reduce((t, f) => ({ added: t.added + (f.added ?? 0), removed: t.removed + (f.removed ?? 0) }), { added: 0, removed: 0 });
 
   return (
-    <Dialog
-      open={commit !== null}
-      onClose={onClose}
-      title={commit?.subject ?? ""}
-      className="max-w-2xl"
-      description={
-        commit && (
-          <span className="flex flex-wrap items-center gap-x-1.5">
-            <span className="selectable font-mono">{commit.hash.slice(0, 10)}</span>·<span>{commit.author}</span>·<span>{when(commit.time, true)}</span>
-            {unpushed && <span className="rounded bg-warn-soft px-1.5 text-warn">未推送</span>}
-          </span>
-        )
-      }
-      footer={
-        <Button variant="outline" onClick={onClose}>
-          关闭
-        </Button>
-      }
-    >
+    <div className="selectable flex h-full min-h-0 flex-col">
+      <div className="shrink-0 space-y-1 border-b-[0.5px] border-line-2 px-3.5 pb-2.5 pt-3">
+        <div className="text-[14px] font-semibold leading-5">{commit.subject}</div>
+        <div className="flex flex-wrap items-center gap-x-1.5 text-[11.5px] text-muted">
+          <span className="font-mono">{hash.slice(0, 10)}</span>·<span>{detail ? `${commit.author} <${detail.email}>` : commit.author}</span>·<span>{when(commit.time, true)}</span>
+          {unpushed && <span className="rounded bg-warn-soft px-1.5 text-warn">未推送</span>}
+        </div>
+      </div>
       {error ? (
-        <div className="selectable whitespace-pre-wrap text-[12.5px] text-danger">{error}</div>
+        <div className="whitespace-pre-wrap px-3.5 py-3 text-[12.5px] text-danger">{error}</div>
       ) : !detail ? (
-        <div className="flex items-center gap-2 py-6 text-[13px] text-muted">
+        <div className="flex flex-1 items-center justify-center gap-2 text-[13px] text-muted">
           <Loader2 className="h-4 w-4 animate-spin" />
           正在读取…
         </div>
       ) : (
-        <div className="space-y-3">
-          {detail.body && <div className="selectable whitespace-pre-wrap text-[13px] leading-6">{detail.body}</div>}
-          <div>
-            <div className="group-label pb-1">
-              {detail.files.length} 个文件
-              {totals && (
-                <span className="ml-2 font-mono normal-case">
-                  <span className="text-ok">+{totals.added}</span> <span className="text-danger">−{totals.removed}</span>
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {detail.body && <div className="whitespace-pre-wrap border-b-[0.5px] border-line-2 px-3.5 py-3 text-[13px] leading-6">{detail.body}</div>}
+          <div className="flex items-baseline gap-2 px-3.5 pb-1 pt-2.5 text-[11.5px] text-muted">
+            {detail.files.length} 个文件
+            {totals && (
+              <span className="font-mono">
+                <span className="text-ok">+{totals.added}</span> <span className="text-danger">−{totals.removed}</span>
+              </span>
+            )}
+          </div>
+          <div className="pb-1">
+            {detail.files.length === 0 && <div className="px-3.5 py-1 text-[12px] text-muted">没有文件改动（空提交或合并）</div>}
+            {detail.files.map((f) => (
+              <div key={f.path} className="flex items-baseline gap-2.5 px-3.5 py-[3px] text-[12px] leading-5">
+                <Badge kind={f.kind} />
+                <span className="min-w-0 flex-1 break-all font-mono text-fg-2">
+                  {f.path}
+                  {f.from && <span className="text-muted"> ← {f.from}</span>}
                 </span>
-              )}
-            </div>
-            <div className="selectable max-h-[320px] overflow-y-auto rounded-lg bg-card-2 py-1 shadow-card">
-              {detail.files.length === 0 && <div className="px-3 py-2 text-[12px] text-muted">没有文件改动（空提交或合并）</div>}
-              {detail.files.map((f) => (
-                <div key={f.path} className="flex items-baseline gap-2.5 px-3 py-[3px] text-[12px] leading-5">
-                  <Badge kind={f.kind} />
-                  <span className="min-w-0 flex-1 break-all font-mono text-fg-2">
-                    {f.path}
-                    {f.from && <span className="text-muted"> ← {f.from}</span>}
-                  </span>
-                  <span className="shrink-0 font-mono text-[11.5px]">
-                    {f.added === null ? (
-                      <span className="text-muted">二进制</span>
-                    ) : (
-                      <>
-                        <span className="text-ok">+{f.added}</span> <span className="text-danger">−{f.removed}</span>
-                      </>
-                    )}
-                  </span>
-                </div>
-              ))}
-            </div>
+                <span className="shrink-0 font-mono text-[11.5px]">
+                  {f.added === null ? (
+                    <span className="text-muted">二进制</span>
+                  ) : (
+                    <>
+                      <span className="text-ok">+{f.added}</span> <span className="text-danger">−{f.removed}</span>
+                    </>
+                  )}
+                </span>
+              </div>
+            ))}
           </div>
         </div>
       )}
-    </Dialog>
+    </div>
   );
 }
 
@@ -154,7 +141,9 @@ export function SourcePage() {
   const [body, setBody] = useState("");
   const [busy, setBusy] = useState<"commit" | "push" | "pull" | null>(null);
   const [confirmPush, setConfirmPush] = useState(false);
-  const [open, setOpen] = useState<SourceCommit | null>(null);
+  // The box on the left shows either the working changes or the commit picked in the history.
+  const [picked, setPicked] = useState<SourceCommit | null>(null);
+  const [showing, setShowing] = useState<"changes" | "commit">("changes");
   // Only the newest read may update the page; an older one that ends later is dropped.
   const generation = useRef(0);
 
@@ -229,7 +218,8 @@ export function SourcePage() {
   const canPush = !!status?.branch && needsPush && status.behind === 0 && (commits?.length ?? 0) > 0 && busy === null;
   const target = status && status.upstream && !status.upstreamGone ? status.upstream : `origin/${status?.branch}`;
   const ahead = status?.ahead ?? 0;
-  const openIndex = open ? (commits?.findIndex((c) => c.hash === open.hash) ?? -1) : -1;
+  const pickedIndex = picked ? (commits?.findIndex((c) => c.hash === picked.hash) ?? -1) : -1;
+  const viewingCommit = showing === "commit" && picked !== null;
 
   return (
     <div className="flex h-full min-h-0 flex-col px-5 pb-5">
@@ -278,9 +268,19 @@ export function SourcePage() {
 
       <div className="flex min-h-0 flex-1 gap-4">
         <section className="flex min-w-0 flex-1 flex-col gap-3">
-          <div className="group-label">改动{status ? `（${status.changes.length}）` : ""}</div>
+          <Segmented
+            value={viewingCommit ? "commit" : "changes"}
+            onChange={setShowing}
+            className="self-start"
+            options={[
+              { value: "changes", label: `改动${status ? `（${status.changes.length}）` : ""}`, title: "尚未提交的改动" },
+              ...(picked ? [{ value: "commit" as const, label: `提交 ${picked.hash.slice(0, 7)}`, title: picked.subject }] : []),
+            ]}
+          />
           <div className="selectable min-h-0 flex-1 overflow-y-auto rounded-lg bg-card-2 py-1 shadow-card">
-            {!status ? (
+            {viewingCommit ? (
+              <CommitView commit={picked} unpushed={pickedIndex >= 0 && pickedIndex < ahead} />
+            ) : !status ? (
               <div className="flex h-full items-center justify-center gap-2 text-[13px] text-muted">
                 <Loader2 className="h-4 w-4 animate-spin" />
                 正在读取…
@@ -299,40 +299,44 @@ export function SourcePage() {
               ))
             )}
           </div>
-          <div className="shrink-0 space-y-2">
-            <Input
-              value={title}
-              onChange={(e) => setTitle(e.target.value.replace(/[\r\n]+/g, " "))}
-              placeholder="标题，例如：新文章《…》"
-              aria-label="提交标题"
-              onKeyDown={(e) => {
-                if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && canCommit) {
-                  e.preventDefault();
-                  commit();
-                }
-              }}
-            />
-            <Textarea
-              value={body}
-              onChange={(e) => setBody(e.target.value)}
-              placeholder="说明（可选）：改了什么、为什么"
-              aria-label="提交说明"
-              className="min-h-[64px] font-sans text-[13px]"
-              onKeyDown={(e) => {
-                if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && canCommit) {
-                  e.preventDefault();
-                  commit();
-                }
-              }}
-            />
-          </div>
-          <div className="flex shrink-0 items-center justify-between gap-2">
-            <span className="text-[11.5px] text-muted">会提交列出的全部改动（含新文件）。⌘↵ 提交。</span>
-            <Button disabled={!canCommit} onClick={commit}>
-              {busy === "commit" ? <Loader2 className="animate-spin" /> : <GitCommitHorizontal />}
-              提交全部改动
-            </Button>
-          </div>
+          {!viewingCommit && (
+            <>
+              <div className="shrink-0 space-y-2">
+                <Input
+                  value={title}
+                  onChange={(e) => setTitle(e.target.value.replace(/[\r\n]+/g, " "))}
+                  placeholder="标题，例如：新文章《…》"
+                  aria-label="提交标题"
+                  onKeyDown={(e) => {
+                    if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && canCommit) {
+                      e.preventDefault();
+                      commit();
+                    }
+                  }}
+                />
+                <Textarea
+                  value={body}
+                  onChange={(e) => setBody(e.target.value)}
+                  placeholder="说明（可选）：改了什么、为什么"
+                  aria-label="提交说明"
+                  className="min-h-[64px] font-sans text-[13px]"
+                  onKeyDown={(e) => {
+                    if ((e.metaKey || e.ctrlKey) && e.key === "Enter" && canCommit) {
+                      e.preventDefault();
+                      commit();
+                    }
+                  }}
+                />
+              </div>
+              <div className="flex shrink-0 items-center justify-between gap-2">
+                <span className="text-[11.5px] text-muted">会提交列出的全部改动（含新文件）。⌘↵ 提交。</span>
+                <Button disabled={!canCommit} onClick={commit}>
+                  {busy === "commit" ? <Loader2 className="animate-spin" /> : <GitCommitHorizontal />}
+                  提交全部改动
+                </Button>
+              </div>
+            </>
+          )}
         </section>
 
         <section className="flex w-[300px] shrink-0 flex-col gap-3">
@@ -346,7 +350,19 @@ export function SourcePage() {
             )}
             {commits?.length === 0 && <div className="px-2 text-[13px] text-muted">还没有提交</div>}
             {commits?.map((c, i) => (
-              <button key={c.hash} onClick={() => setOpen(c)} className="block w-full rounded-[7px] px-2 py-1.5 text-left hover:bg-pill active:!scale-100">
+              <button
+                key={c.hash}
+                onClick={() => {
+                  const same = viewingCommit && picked?.hash === c.hash;
+                  setPicked(c);
+                  setShowing(same ? "changes" : "commit");
+                }}
+                aria-pressed={viewingCommit && picked?.hash === c.hash}
+                className={cn(
+                  "block w-full rounded-[7px] px-2 py-1.5 text-left active:!scale-100",
+                  viewingCommit && picked?.hash === c.hash ? "bg-card shadow-edge dark:bg-white/[.07]" : "hover:bg-pill",
+                )}
+              >
                 <div className="line-clamp-2 text-[13px] leading-5">{c.subject}</div>
                 <div className="flex items-center gap-1.5 text-[11.5px] text-muted">
                   <span className="font-mono">{c.hash.slice(0, 7)}</span>
@@ -365,8 +381,6 @@ export function SourcePage() {
           </div>
         </section>
       </div>
-
-      <CommitDialog commit={open} unpushed={openIndex >= 0 && openIndex < ahead} onClose={() => setOpen(null)} />
 
       <Dialog
         open={confirmPush}
