@@ -57,20 +57,32 @@ pub fn sources(blog: &Blog) -> Vec<Source> {
             out.push(Source { file: rel(&path), title, text });
         }
     }
-    let mut configs: Vec<_> = std::fs::read_dir(&blog.root)
+    let mut config_dirs = vec![blog.root.clone()];
+    let mut themes: Vec<_> = std::fs::read_dir(blog.root.join("themes")).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.is_dir()).collect();
+    themes.sort();
+    config_dirs.extend(themes);
+    for dir in config_dirs {
+        for path in config_files(&dir) {
+            if let Ok(text) = std::fs::read_to_string(&path) {
+                out.push(Source { file: rel(&path), title: None, text });
+            }
+        }
+    }
+    out
+}
+
+/// The `_config*.yml` files directly in `dir`. A theme's own are included (the menu icons live
+/// there); the rest of a theme is code and templates, which are not touched.
+fn config_files(dir: &Path) -> Vec<std::path::PathBuf> {
+    let mut files: Vec<_> = std::fs::read_dir(dir)
         .into_iter()
         .flatten()
         .flatten()
         .map(|e| e.path())
-        .filter(|p| p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("_config") && n.to_string_lossy().ends_with(".yml")))
+        .filter(|p| p.is_file() && p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("_config") && n.to_string_lossy().ends_with(".yml")))
         .collect();
-    configs.sort();
-    for path in configs {
-        if let Ok(text) = std::fs::read_to_string(&path) {
-            out.push(Source { file: rel(&path), title: None, text });
-        }
-    }
-    out
+    files.sort();
+    files
 }
 
 /// Which files use each library image.
@@ -199,4 +211,48 @@ pub async fn run(
         }
     }
     Ok(report)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::infra::blog;
+
+    fn write(root: &Path, file: &str, text: &str) {
+        let p = root.join(file);
+        std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+        std::fs::write(p, text).unwrap();
+    }
+
+    #[test]
+    fn the_scan_covers_root_and_theme_configs_but_not_theme_code() {
+        // Arrange
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path();
+        write(root, "_config.yml", "title: t\n");
+        write(root, "_config.anzhiyu.yml", "a: 1\n");
+        write(root, "package.json", r#"{"dependencies":{"hexo":"^7"}}"#);
+        write(root, "source/_posts/p.md", "---\ntitle: P\n---\n");
+        write(root, "themes/anzhiyu/_config.yml", "icon: x\n");
+        write(root, "themes/anzhiyu/_config.dev.yml", "icon: y\n");
+        write(root, "themes/anzhiyu/languages/zh-CN.yml", "k: v\n");
+        write(root, "themes/anzhiyu/source/data/links.json", "{}");
+        write(root, "themes/anzhiyu/node_modules/dep/_config.yml", "no: 1\n");
+        let blog = blog::open(root).unwrap();
+
+        // Act
+        let files: Vec<String> = sources(&blog).into_iter().map(|s| s.file).collect();
+
+        // Assert
+        assert_eq!(
+            files,
+            [
+                "source/_posts/p.md",
+                "_config.anzhiyu.yml",
+                "_config.yml",
+                "themes/anzhiyu/_config.dev.yml",
+                "themes/anzhiyu/_config.yml",
+            ]
+        );
+    }
 }
