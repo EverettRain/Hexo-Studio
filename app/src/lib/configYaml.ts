@@ -32,7 +32,7 @@ export function getIn(data: unknown, path: Path): unknown {
   return at;
 }
 
-function setIn(data: unknown, path: Path, value: unknown): unknown {
+export function setIn(data: unknown, path: Path, value: unknown): unknown {
   if (!path.length) return value;
   const [head, ...rest] = path;
   const base = data !== null && typeof data === "object" ? data : typeof head === "number" ? [] : {};
@@ -358,12 +358,25 @@ export function removeItem(text: string, path: Path, index: number): string {
   const before = doc.toJS() ?? {};
   const list = getIn(before, path) as unknown[];
   const next = list.filter((_, i) => i !== index);
-  const { slot, seq } = seqAt(doc, path);
-  if (seq.flow || seq.items.length === 1) return checked(before, path, next, splice(text, replaceSlot(text, slot, next)));
+  // A file whose top level is a list (`source/_data/link.yml` and the like).
+  const root = path.length === 0;
+  if (root && !isSeq(doc.contents)) throw new Error("这一项不是列表");
+  const { slot, seq } = root ? { slot: null, seq: doc.contents as YAMLSeq } : seqAt(doc, path);
+  if (seq.flow || seq.items.length === 1) {
+    if (!slot) return checked(before, path, next, `${renderFlow(next)}\n`);
+    return checked(before, path, next, splice(text, replaceSlot(text, slot, next)));
+  }
   const item = seq.items[index] as Node;
   const start = lineStart(text, item.range![0]);
-  const end = lineEnd(text, contentEnd(text, item));
-  return checked(before, path, next, text.slice(0, start) + text.slice(Math.min(end + 1, text.length)));
+  let end = Math.min(lineEnd(text, contentEnd(text, item)) + 1, text.length);
+  // The blank line that set the item apart goes with it, rather than leaving two in a row (or
+  // one at the top of the file).
+  if (text[end] === "\n" && (start === 0 || text.slice(0, start).endsWith("\n\n"))) end++;
+  // The file's last item in a file without a final newline: the line break before it goes, so
+  // the file still ends as it did.
+  let from = start;
+  if (end >= text.length && !text.endsWith("\n") && from > 0) from--;
+  return checked(before, path, next, text.slice(0, from) + text.slice(end));
 }
 
 /** Adds `value` at the end of the list at `path` (making the list when there is none). */
@@ -372,9 +385,12 @@ export function appendItem(text: string, path: Path, value: unknown): string {
   const before = doc.toJS() ?? {};
   const current = getIn(before, path);
   const next = [...(Array.isArray(current) ? current : []), value];
-  const slot = find(doc, path);
-  if (!slot || !isSeq(slot.node) || slot.node.flow || !slot.node.items.length) return setValue(text, path, next);
-  const items = slot.node.items as Node[];
+  const list = path.length === 0 ? doc.contents : find(doc, path)?.node;
+  if (!isSeq(list) || list.flow || !list.items.length) {
+    if (path.length === 0) return checked(before, path, next, `${new Document(next).toString({ lineWidth: 0 })}`);
+    return setValue(text, path, next);
+  }
+  const items = list.items as Node[];
   const first = items[0];
   const ls = lineStart(text, first.range![0]);
   const dash = text.indexOf("-", ls) - ls;

@@ -386,6 +386,25 @@ pub async fn config_read(ws: Ws<'_>, file: ConfigFile) -> Result<ConfigText, Str
     blocking(move || blog.read_config(file)).await
 }
 
+/// The page data files in `source/_data`.
+#[tauri::command]
+pub async fn data_files(ws: Ws<'_>) -> Result<Vec<String>, String> {
+    let blog = current_blog(&ws)?;
+    blocking(move || Ok(blog.data_files())).await
+}
+
+#[tauri::command]
+pub async fn data_read(ws: Ws<'_>, name: String) -> Result<ConfigText, String> {
+    let blog = current_blog(&ws)?;
+    blocking(move || blog.read_data(&name)).await
+}
+
+#[tauri::command]
+pub async fn data_write(ws: Ws<'_>, name: String, text: String, expected: String) -> Result<ConfigWrite, String> {
+    let blog = current_blog(&ws)?;
+    blocking(move || blog.write_data(&name, &text, &expected)).await
+}
+
 /// The Hexo plugins the blog installs, as Hexo picks them from `package.json`.
 #[tauri::command]
 pub async fn list_plugins(ws: Ws<'_>) -> Result<Vec<crate::domain::plugins::Plugin>, String> {

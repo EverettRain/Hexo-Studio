@@ -120,6 +120,11 @@ impl ConfigFile {
     }
 }
 
+/// A page data file directly in `source/_data` (`link.yml`, `extra_bangumis.json`…), by name.
+pub fn is_data_file(name: &str) -> bool {
+    !name.starts_with('.') && !name.contains(['/', '\\']) && [".yml", ".yaml", ".json"].iter().any(|ext| name.len() > ext.len() && name.ends_with(ext))
+}
+
 /// Whether a `package.json` lists `hexo` among its dependencies.
 pub fn declares_hexo(package_json: &str) -> bool {
     let Ok(v) = serde_json::from_str::<serde_json::Value>(package_json) else { return false };
@@ -140,6 +145,17 @@ mod tests {
         assert_eq!(ConfigFile::Theme.path(theme).as_deref(), Some("_config.anzhiyu.yml"));
         assert_eq!(ConfigFile::ThemeDefaults.path(theme).as_deref(), Some("themes/anzhiyu/_config.yml"));
         assert!(ConfigFile::Theme.writable() && !ConfigFile::ThemeDefaults.writable());
+    }
+
+    #[test]
+    fn data_files_are_plain_yaml_or_json_names() {
+        // Act / Assert
+        for ok in ["link.yml", "about.yaml", "extra_bangumis.json"] {
+            assert!(is_data_file(ok), "{ok}");
+        }
+        for bad in ["../_config.yml", "a/b.yml", ".hidden.yml", "notes.md", ".yml", "x.json/"] {
+            assert!(!is_data_file(bad), "{bad}");
+        }
     }
 
     #[test]

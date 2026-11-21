@@ -1,21 +1,28 @@
 import { AlertTriangle, CheckCircle2, FolderSearch, Loader2, RotateCw, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Field, type FieldContext } from "@/components/ConfigFields";
-import { AsidePanel, CommentsPanel, PluginPanel, SearchPanel } from "@/components/ConfigPanels";
+import { AsidePanel, CommentsPanel, DataFilePanel, PluginPanel, SearchPanel } from "@/components/ConfigPanels";
 import { ImagePicker } from "@/components/ImagePicker";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
 import { useToast } from "@/components/ui/toast";
 import { api, errorText, type BlogStatus, type ConfigFile, type Plugin, type PreviewState } from "@/lib/api";
 import { appendItem, getIn, HEXO_CORE_KEYS, merge, outline, pathKey, readConfig, removeItem, removeKey, renameKey, sameValue, setValue, type Path } from "@/lib/configYaml";
+import { jsonEdits } from "@/lib/dataJson";
 import { indexImages, type ImageIndex } from "@/lib/images";
 import { pluginSections } from "@/lib/plugins";
 import { SEARCH_PANEL, SEARCH_SERVICES, taskGroups } from "@/lib/themeGroups";
 import { useOnShow } from "@/lib/pageActive";
 import { cn } from "@/lib/utils";
 
-type View = "site" | "plugins" | "theme";
-type Editable = Exclude<ConfigFile, "themeDefaults">;
+type View = "site" | "plugins" | "theme" | "data";
+/** A file the page edits: the site's or the theme's config, or a page data file (`data:link.yml`). */
+type FileKey = Exclude<ConfigFile, "themeDefaults"> | `data:${string}`;
+const dataName = (key: FileKey) => (key.startsWith("data:") ? key.slice(5) : null);
+
+const yamlEdits = { setValue, appendItem, removeItem, removeKey, renameKey };
+/** JSON data files are rewritten whole (in their own indent): YAML's in-place edits could write YAML. */
+const editsFor = (key: FileKey) => (key.endsWith(".json") ? jsonEdits : yamlEdits);
 /** How the theme's sections are listed: by what they are for, or by the theme file's own headers. */
 type ThemeOrder = "task" | "file";
 
@@ -51,7 +58,7 @@ function searchText(key: string, value: unknown, hints: Map<string, string>): st
  */
 export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onStatus: (s: BlogStatus) => void }) {
   const toast = useToast();
-  const [files, setFiles] = useState<Partial<Record<Editable, Loaded>>>({});
+  const [files, setFiles] = useState<Partial<Record<FileKey, Loaded>>>({});
   const [defaults, setDefaults] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [view, setView] = useState<View>("theme");
@@ -63,20 +70,23 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
   const [order, setOrder] = useState<ThemeOrder>("task");
   const [images, setImages] = useState<ImageIndex>(new Map());
   const [plugins, setPlugins] = useState<Plugin[]>([]);
-  const [picking, setPicking] = useState<{ file: Editable; path: Path } | null>(null);
-  const timers = useRef<Partial<Record<Editable, number>>>({});
+  const [picking, setPicking] = useState<{ file: FileKey; path: Path } | null>(null);
+  const timers = useRef<Partial<Record<FileKey, number>>>({});
   const latest = useRef(files);
   latest.current = files;
 
   const load = useCallback(async () => {
     try {
-      const [site, theme, themeDefaults] = await Promise.all([
+      const [site, theme, themeDefaults, names] = await Promise.all([
         api.configRead("site"),
         api.configRead("theme").catch(() => null),
         api.configRead("themeDefaults").catch(() => null),
+        api.dataFiles().catch(() => [] as string[]),
       ]);
-      const next: Partial<Record<Editable, Loaded>> = { site: { path: site.path, text: site.text, fingerprint: site.fingerprint } };
+      const next: Partial<Record<FileKey, Loaded>> = { site: { path: site.path, text: site.text, fingerprint: site.fingerprint } };
       if (theme) next.theme = { path: theme.path, text: theme.text, fingerprint: theme.fingerprint };
+      const data = await Promise.all(names.map((n) => api.dataRead(n).then((d) => [n, d] as const, () => null)));
+      for (const d of data) if (d) next[`data:${d[0]}`] = { path: d[1].path, text: d[1].text, fingerprint: d[1].fingerprint };
       setFiles(next);
       setDefaults(themeDefaults?.exists ? themeDefaults.text : null);
       // Thumbnails only: the page works without the library.
@@ -98,13 +108,14 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
   });
 
   const save = useCallback(
-    async (file: Editable) => {
+    async (file: FileKey) => {
       timers.current[file] = undefined;
       const f = latest.current[file];
       if (!f) return;
       setSaving("saving");
+      const name = dataName(file);
       try {
-        const r = await api.configWrite(file, f.text, f.fingerprint);
+        const r = name ? await api.dataWrite(name, f.text, f.fingerprint) : await api.configWrite(file as ConfigFile, f.text, f.fingerprint);
         if (r.status === "conflict") {
           toast(`${f.path} 在别处被改过，已重新读取；刚才的改动没有保存。`, "error");
           await load();
@@ -113,7 +124,8 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
         }
         setFiles((all) => ({ ...all, [file]: { ...all[file]!, fingerprint: r.fingerprint } }));
         setSaving("idle");
-        setNeedsRestart(true);
+        // Hexo reads its config only when it starts; page data it watches like posts.
+        if (!name) setNeedsRestart(true);
         // The rest of the app reads the site's title, addresses and time zone from it.
         if (file === "site") void api.blogStatus().then(onStatus, () => {});
       } catch (e) {
@@ -125,7 +137,7 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
   );
 
   const edit = useCallback(
-    (file: Editable, change: (text: string) => string) => {
+    (file: FileKey, change: (text: string) => string) => {
       const f = latest.current[file];
       if (!f) return;
       let text: string;
@@ -149,7 +161,7 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
   // Changes still waiting when the page goes away are written at once.
   useEffect(
     () => () => {
-      for (const file of Object.keys(timers.current) as Editable[]) {
+      for (const file of Object.keys(timers.current) as FileKey[]) {
         if (timers.current[file]) {
           window.clearTimeout(timers.current[file]);
           void save(file);
@@ -159,7 +171,13 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
     [save],
   );
 
-  const file: Editable = view === "theme" ? "theme" : "site";
+  // In the data view the file is the one chosen; worked out here, before the page reads it, the
+  // same way `section` is below.
+  const q = query.trim().toLowerCase();
+  const dataNames = (Object.keys(files) as FileKey[]).map(dataName).filter((n): n is string => n !== null);
+  const dataShown = dataNames.filter((n) => !q || `${n}\n${files[`data:${n}`]!.text}`.toLowerCase().includes(q));
+  const dataSection = selected.data && dataShown.includes(selected.data) ? selected.data : dataShown[0];
+  const file: FileKey = view === "data" ? `data:${dataSection ?? ""}` : view === "theme" ? "theme" : "site";
   const current = files[file];
   const parsed = useMemo(() => (current ? readConfig(current.text) : null), [current]);
   const defaultsData = useMemo(() => (defaults ? readConfig(defaults).data : undefined), [defaults]);
@@ -177,6 +195,7 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
 
   // The sections of this view, under the file's own headers (the theme's) or as one list.
   const groups = useMemo(() => {
+    if (view === "data") return [{ title: "", keys: dataNames }];
     if (!info) return [];
     if (view === "theme") {
       const extra = Object.keys(themeDefaults ?? {}).filter((k) => !(k in data));
@@ -193,11 +212,12 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
       ].filter((g) => g.keys.length);
     }
     return [{ title: "", keys: Object.keys(data).filter((k) => HEXO_CORE_KEYS.has(k)) }];
-  }, [info, view, data, themeDefaults, order, sections, pluginViews]);
+  }, [info, view, data, themeDefaults, order, sections, pluginViews, dataNames.join("\n")]);
 
-  const q = query.trim().toLowerCase();
   const sectionText = (k: string) =>
-    k === SEARCH_PANEL
+    view === "data"
+      ? `${k}\n${files[`data:${k}`]?.text ?? ""}`.toLowerCase()
+      : k === SEARCH_PANEL
       ? `搜索 search ${SEARCH_SERVICES.map((s) => searchText(s.key, data[s.key] ?? themeDefaults?.[s.key], hints)).join("\n")}`
       : view === "plugins" && pluginView(k)
         ? [k, pluginView(k)!.plugin.description ?? "", ...pluginView(k)!.keys.map((key) => searchText(key, data[key], hints))].join("\n").toLowerCase()
@@ -209,11 +229,12 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
             .map((g) => (g.title.toLowerCase().includes(q) ? g : { ...g, keys: g.keys.filter((k) => sectionText(k).includes(q)) }))
             .filter((g) => g.keys.length)
         : groups,
-    [groups, q, data, themeDefaults, hints],
+    [groups, q, data, themeDefaults, hints, files],
   );
   const allKeys = shownGroups.flatMap((g) => g.keys);
   const section = selected[view] && allKeys.includes(selected[view]!) ? selected[view]! : allKeys[0];
 
+  const ops = editsFor(file);
   const ctx: FieldContext = {
     hints,
     defaults: themeDefaults,
@@ -222,15 +243,15 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
     skip: new Set(),
     images,
     pickImage: (path) => setPicking({ file, path }),
-    set: (path, value) => edit(file, (t) => setValue(t, path, value)),
-    setMany: (changes) => edit(file, (t) => changes.reduce((acc, [path, value]) => setValue(acc, path, value), t)),
-    renameKey: (path, name) => edit(file, (t) => renameKey(t, path, name)),
-    removeKey: (path) => edit(file, (t) => removeKey(t, path)),
-    append: (path, value) => edit(file, (t) => appendItem(t, path, value)),
+    set: (path, value) => edit(file, (t) => ops.setValue(t, path, value)),
+    setMany: (changes) => edit(file, (t) => changes.reduce((acc, [path, value]) => ops.setValue(acc, path, value), t)),
+    renameKey: (path, name) => edit(file, (t) => ops.renameKey(t, path, name)),
+    removeKey: (path) => edit(file, (t) => ops.removeKey(t, path)),
+    append: (path, value) => edit(file, (t) => ops.appendItem(t, path, value)),
     remove: (path, index) => {
       const list = getIn(data, path) as unknown[];
       const item = list[index];
-      edit(file, (t) => removeItem(t, path, index));
+      edit(file, (t) => ops.removeItem(t, path, index));
       const def = themeDefaults ? getIn(themeDefaults, path) : undefined;
       if (Array.isArray(def) && (merge(def, list.filter((_, i) => i !== index)) as unknown[]).some((x) => sameValue(x, item))) {
         toast("已从覆盖文件删除，但主题默认里也有这一项，Hexo 合并后它仍会出现。", "error");
@@ -252,7 +273,8 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
   };
 
   if (error) return <div className="flex h-full items-center justify-center px-8 text-center text-[13px] text-fg-2">{error}</div>;
-  if (!current) return null;
+  if (!files.site) return null;
+  const shownPath = current?.path ?? (view === "data" ? "source/_data" : "");
 
   const themeName = files.theme?.path.replace(/^_config\.|\.yml$/g, "");
   const changedFromDefault = (k: string): boolean =>
@@ -272,10 +294,11 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
             { value: "site", label: "站点", title: "_config.yml 里 Hexo 自己的设置" },
             { value: "plugins", label: "插件", title: "_config.yml 里各插件的设置" },
             ...(files.theme ? [{ value: "theme" as const, label: `主题 · ${themeName}`, title: `${files.theme.path}（Hexo 把它合并到主题默认值上）` }] : []),
+            { value: "data", label: "页面数据", title: "source/_data 里友链、相册、装备等页面用的数据" },
           ]}
         />
-        <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-muted" title={current.path}>
-          {current.path}
+        <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-muted" title={shownPath}>
+          {shownPath}
         </span>
         <span className="flex shrink-0 items-center gap-1 text-[12px] text-muted">
           {saving === "saving" || saving === "pending" ? (
@@ -308,9 +331,9 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
         </div>
       )}
 
-      {parsed?.error ? (
+      {parsed?.error && view !== "data" ? (
         <div className="flex flex-1 flex-col items-center justify-center gap-2 px-8 text-center text-[13px] text-fg-2">
-          <div className="text-danger">{current.path} 不是有效的 YAML，无法按项编辑：</div>
+          <div className="text-danger">{shownPath} 不是有效的 YAML，无法按项编辑：</div>
           <div className="selectable font-mono text-[12px]">{parsed.error}</div>
           <div className="text-muted">请在编辑器里修好后回到这里。</div>
         </div>
@@ -339,7 +362,8 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
                   {g.title && <div className="group-label truncate pt-1" title={g.title}>{g.title}</div>}
                   {g.keys.map((k) => {
                     const p = view === "plugins" ? pluginView(k)?.plugin : undefined;
-                    const hint = k === SEARCH_PANEL ? "Algolia、本地搜索、DocSearch 三选一" : p ? (p.version ? `${p.version} · ${p.description ?? ""}` : "没有安装") : hints.get(pathKey([k]));
+                    const d = view === "data" ? readConfig(files[`data:${k}`]?.text ?? "").data : undefined;
+                    const hint = view === "data" ? (Array.isArray(d) ? `${d.length} 组` : "") : k === SEARCH_PANEL ? "Algolia、本地搜索、DocSearch 三选一" : p ? (p.version ? `${p.version} · ${p.description ?? ""}` : "没有安装") : hints.get(pathKey([k]));
                     return (
                       <button
                         key={k}
@@ -377,7 +401,14 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
                     hints.get(pathKey([section])) && <div className="mt-0.5 text-[12px] text-muted">{hints.get(pathKey([section]))}</div>
                   )}
                 </div>
-                {view === "plugins" && pluginView(section) ? (
+                {view === "data" && parsed?.error ? (
+                  <div className="space-y-1 text-[13px]">
+                    <div className="text-danger">这个文件有语法错误，无法按项编辑：</div>
+                    <div className="selectable font-mono text-[12px] text-fg-2">{parsed.error}</div>
+                  </div>
+                ) : view === "data" ? (
+                  <DataFilePanel name={section} data={parsed?.data} ctx={ctx} />
+                ) : view === "plugins" && pluginView(section) ? (
                   <PluginPanel view={pluginView(section)!} data={data} ctx={ctx} onError={(m) => toast(m, "error")} />
                 ) : view === "theme" && section === SEARCH_PANEL ? (
                   <SearchPanel {...panelProps} />
@@ -401,7 +432,7 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
         postId={null}
         onClose={() => setPicking(null)}
         onPick={(img) => {
-          if (picking) edit(picking.file, (t) => setValue(t, picking.path, img.url));
+          if (picking) edit(picking.file, (t) => editsFor(picking.file).setValue(t, picking.path, img.url));
           setPicking(null);
         }}
       />

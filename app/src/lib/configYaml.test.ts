@@ -333,3 +333,28 @@ describe("link || icon", () => {
     expect(joinLink("/a/", " ")).toBe("/a/");
   });
 });
+
+describe("a file whose top level is a list", () => {
+  const LINKS = "- class_name: 框架\n  link_list:\n    - name: Hexo\n\n- class_name: 推荐博客\n  link_list: []\n";
+
+  it("adds a group after the others and removes one with its lines", () => {
+    // Act
+    const added = appendItem(LINKS, [], blankLike(readConfig(LINKS).data && (readConfig(LINKS).data as unknown[])[0]));
+    const removed = removeItem(LINKS, [], 0);
+
+    // Assert
+    expect(added).toBe(`${LINKS}- class_name: ""\n  link_list: []\n`);
+    expect(removed).toBe("- class_name: 推荐博客\n  link_list: []\n");
+  });
+
+  it("adding then removing the last group gives back a file that had no final newline", () => {
+    // Arrange
+    const noNewline = "- class_name: 赞赏\n  reward_list:\n    - name: a";
+
+    // Act
+    const out = removeItem(appendItem(noNewline, [], { class_name: "", reward_list: [] }), [], 1);
+
+    // Assert
+    expect(out).toBe(noNewline);
+  });
+});

@@ -1,7 +1,7 @@
 //! The blog folder on disk: checking it, reading its config, listing, reading and writing posts,
 //! and reading and writing the config files the config page edits.
 
-use crate::domain::config::{declares_hexo, BlogConfig, ConfigFile};
+use crate::domain::config::{declares_hexo, is_data_file, BlogConfig, ConfigFile};
 use crate::domain::permalink;
 use crate::domain::plugins::{self, Plugin};
 use crate::domain::post::{self, Meta};
@@ -250,6 +250,47 @@ impl Blog {
 }
 
 impl Blog {
+    fn data_dir(&self) -> PathBuf {
+        self.source().join("_data")
+    }
+
+    /// The page data files in `source/_data`, by name.
+    pub fn data_files(&self) -> Vec<String> {
+        let mut names: Vec<String> = std::fs::read_dir(self.data_dir())
+            .into_iter()
+            .flatten()
+            .flatten()
+            .filter(|e| e.path().is_file())
+            .map(|e| e.file_name().to_string_lossy().into_owned())
+            .filter(|n| is_data_file(n))
+            .collect();
+        names.sort();
+        names
+    }
+
+    fn data_file(&self, name: &str) -> Result<(String, PathBuf), String> {
+        if !is_data_file(name) {
+            return Err(format!("不是页面数据文件：{name}"));
+        }
+        Ok((format!("{}/_data/{name}", self.config.source_dir), self.data_dir().join(name)))
+    }
+
+    pub fn read_data(&self, name: &str) -> Result<ConfigText, String> {
+        let (rel, path) = self.data_file(name)?;
+        let text = std::fs::read_to_string(&path).map_err(|e| format!("无法读取 {rel}：{e}"))?;
+        Ok(ConfigText { fingerprint: fingerprint(&text), path: rel, exists: true, text })
+    }
+
+    /// Writes a page data file in place unless it changed since `expected` was read.
+    pub fn write_data(&self, name: &str, text: &str, expected: &str) -> Result<ConfigWrite, String> {
+        let current = self.read_data(name)?;
+        if current.fingerprint != expected {
+            return Ok(ConfigWrite::Conflict);
+        }
+        std::fs::write(self.data_dir().join(name), text).map_err(|e| format!("无法保存 {}：{e}", current.path))?;
+        Ok(ConfigWrite::Saved { fingerprint: fingerprint(text) })
+    }
+
     /// The plugins Hexo loads for this blog: the blog's own, then the theme's not already listed;
     /// each in name order.
     pub fn plugins(&self) -> Vec<Plugin> {
@@ -382,6 +423,30 @@ mod tests {
         // Act / Assert
         assert!(blog.read_config(ConfigFile::Site).unwrap().exists);
         assert!(blog.read_config(ConfigFile::Theme).is_err());
+    }
+
+    #[test]
+    fn lists_reads_and_writes_page_data_files_only() {
+        // Arrange
+        let (dir, blog) = blog();
+        let data = dir.path().join("source/_data");
+        std::fs::create_dir_all(data.join("sub.yml")).unwrap();
+        for (name, text) in [("link.yml", "- class_name: a\n"), ("extra_bangumis.json", "{}\n"), ("notes.md", ""), (".x.yml", "")] {
+            std::fs::write(data.join(name), text).unwrap();
+        }
+        let read = blog.read_data("link.yml").unwrap();
+
+        // Act
+        let saved = blog.write_data("link.yml", "- class_name: b\n", &read.fingerprint).unwrap();
+        let stale = blog.write_data("link.yml", "- class_name: c\n", &read.fingerprint).unwrap();
+
+        // Assert
+        assert_eq!(blog.data_files(), ["extra_bangumis.json", "link.yml"]);
+        assert_eq!(read.path, "source/_data/link.yml");
+        assert!(matches!(saved, ConfigWrite::Saved { .. }));
+        assert_eq!(stale, ConfigWrite::Conflict);
+        assert_eq!(std::fs::read_to_string(data.join("link.yml")).unwrap(), "- class_name: b\n");
+        assert!(blog.read_data("../../_config.yml").is_err());
     }
 
     #[test]

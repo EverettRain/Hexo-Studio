@@ -140,12 +140,24 @@ function Scalar({ path, value, ctx }: { path: Path; value: unknown; ctx: FieldCo
   return <TextValue value={text} placeholder={value === null || value === undefined ? "空" : undefined} onCommit={(v) => ctx.set(path, v === "" && (value === null || value === undefined) ? null : v)} />;
 }
 
-function Label({ path, hint, changed, onlyDefault, address }: { path: Path; hint?: string; changed: boolean; onlyDefault: boolean; address: boolean }) {
+/** What a list item is called: its name, title or date, the keys anzhiyu's lists use. */
+export function itemTitle(item: unknown): string | null {
+  if (!isObject(item)) return null;
+  for (const k of ["class_name", "name", "title", "date", "label", "address"]) {
+    const v = item[k];
+    if (typeof v === "string" && v.trim()) return v.trim();
+    if (typeof v === "number") return String(v);
+  }
+  return null;
+}
+
+function Label({ path, hint, changed, onlyDefault, address, summary }: { path: Path; hint?: string; changed: boolean; onlyDefault: boolean; address: boolean; summary?: string | null }) {
   const key = path[path.length - 1];
   return (
     <div className="min-w-0 pt-[5px]">
       <div className="flex items-center gap-1.5">
         <span className={cn("selectable truncate font-mono text-[12.5px]", onlyDefault ? "text-muted" : "text-fg")}>{typeof key === "number" ? `#${key + 1}` : key}</span>
+        {summary && <span className="selectable min-w-0 truncate text-[12.5px] text-fg-2">{summary}</span>}
         {changed && <span title="与主题默认值不同" className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />}
         {onlyDefault && <span className="shrink-0 rounded bg-pill px-1 text-[10.5px] text-muted">主题默认</span>}
         {address && (
@@ -171,7 +183,8 @@ export function Field({ path, value, def, ctx, inDefaultsOnly = false }: { path:
   const onlyDefault = inDefaultsOnly || (theme && value === undefined && def !== undefined);
   const shown = onlyDefault ? def : value;
   const changed = theme && !onlyDefault && def !== undefined && !sameValue(value, def);
-  const label = <Label path={path} hint={ctx.hints.get(key)} changed={changed} onlyDefault={onlyDefault} address={ctx.addressKeys.has(key)} />;
+  const summary = typeof path[path.length - 1] === "number" ? itemTitle(shown) : null;
+  const label = <Label path={path} hint={ctx.hints.get(key)} changed={changed} onlyDefault={onlyDefault} address={ctx.addressKeys.has(key)} summary={summary} />;
 
   if (ctx.skip.has(key)) return null;
   if (ctx.hidden.has(key)) {

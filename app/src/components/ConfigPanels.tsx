@@ -1,9 +1,9 @@
-import { ExternalLink, Info, TriangleAlert } from "lucide-react";
-import { Field, type FieldContext } from "@/components/ConfigFields";
+import { ExternalLink, Info, Plus, TriangleAlert, X } from "lucide-react";
+import { Field, itemTitle, type FieldContext } from "@/components/ConfigFields";
 import { Segmented } from "@/components/ui/segmented";
 import { Switch } from "@/components/ui/switch";
 import { api, errorText } from "@/lib/api";
-import { getIn, pathKey, type Path } from "@/lib/configYaml";
+import { blankLike, getIn, pathKey, type Path } from "@/lib/configYaml";
 import type { PluginView } from "@/lib/plugins";
 import { ASIDE_CARDS, COMMENT_SERVICES, commentServices, SEARCH_SERVICES, writeCommentServices } from "@/lib/themeGroups";
 import { cn } from "@/lib/utils";
@@ -187,4 +187,75 @@ export function PluginPanel({ view, data, ctx, onError }: { view: PluginView; da
       )}
     </div>
   );
+}
+
+/**
+ * Files hexo-bilibili-bangumi writes when it fetches the lists (`hexo bangumi -u` and the like):
+ * edits would be lost on the next fetch, so they are shown, not edited. Additions by hand go in
+ * the matching `extra_….json`.
+ */
+export const GENERATED_DATA = /^(bangumis|cinemas|games)\.json$/;
+
+/** A page data file in `source/_data`: its groups as cards when it is a list, else its keys. */
+export function DataFilePanel({ name, data, ctx }: { name: string; data: unknown; ctx: FieldContext }) {
+  if (GENERATED_DATA.test(name)) {
+    const lists = data !== null && typeof data === "object" ? Object.entries(data as Record<string, unknown>).filter(([, v]) => Array.isArray(v)) : [];
+    return (
+      <div className="space-y-3">
+        <Note>
+          这个文件由 hexo-bilibili-bangumi 抓取生成（在博客目录执行 hexo bangumi -u 更新），在这里改会被下次抓取覆盖。要手工补充条目，请改 extra_{name}。
+        </Note>
+        <div className="grid grid-cols-3 gap-2">
+          {lists.map(([k, v]) => (
+            <div key={k} className="rounded-lg bg-card-2 px-3 py-2 shadow-card">
+              <div className="font-mono text-[12px] text-muted">{k}</div>
+              <div className="text-[18px] font-semibold tabular-nums">{(v as unknown[]).length}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+    );
+  }
+  if (Array.isArray(data)) {
+    return (
+      <div className="space-y-3">
+        {data.map((group, i) => (
+          <div key={i} className="rounded-lg bg-card-2 px-3.5 py-2.5 shadow-card">
+            <div className="mb-1 flex items-center gap-2 border-b-[0.5px] border-line-2 pb-1.5">
+              <span className="font-mono text-[11.5px] text-faint">#{i + 1}</span>
+              <span className="min-w-0 flex-1 truncate text-[13px] font-semibold">{itemTitle(group) ?? "（未命名）"}</span>
+              <button
+                type="button"
+                title="删除这个分组"
+                aria-label="删除这个分组"
+                onClick={() => ctx.remove([], i)}
+                className="flex h-6 w-6 items-center justify-center rounded-md text-faint hover:bg-pill hover:text-danger"
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
+            <Field path={[i]} value={group} def={undefined} ctx={ctx} />
+          </div>
+        ))}
+        <button
+          type="button"
+          onClick={() => ctx.append([], data.length ? blankLike(data[data.length - 1]) : {})}
+          className="flex h-8 items-center gap-1 rounded-md px-2 text-[12.5px] text-muted hover:bg-pill hover:text-fg"
+        >
+          <Plus className="h-3.5 w-3.5" />
+          添加分组（照最后一组的格式）
+        </button>
+      </div>
+    );
+  }
+  if (data !== null && typeof data === "object") {
+    return (
+      <div>
+        {Object.entries(data as Record<string, unknown>).map(([k, v]) => (
+          <Field key={k} path={[k]} value={v} def={undefined} ctx={ctx} />
+        ))}
+      </div>
+    );
+  }
+  return <Note>这个文件是空的，或者不是列表 / 键值表，无法按项编辑。</Note>;
 }

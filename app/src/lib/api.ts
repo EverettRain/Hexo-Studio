@@ -364,6 +364,10 @@ export const api = {
   previewAwaitChange: (path: string, before: PageProbe | null) => invoke<PageProbe>("preview_await_change", { path, before }),
   blogGitChanges: () => invoke<number | null>("blog_git_changes"),
   listPlugins: () => invoke<Plugin[]>("list_plugins"),
+  /** Page data files in source/_data, by name. */
+  dataFiles: () => invoke<string[]>("data_files"),
+  dataRead: (name: string) => invoke<ConfigText>("data_read", { name }),
+  dataWrite: (name: string, text: string, expected: string) => invoke<ConfigWrite>("data_write", { name, text, expected }),
   configRead: (file: ConfigFile) => invoke<ConfigText>("config_read", { file }),
   configWrite: (file: ConfigFile, text: string, expected: string) => invoke<ConfigWrite>("config_write", { file, text, expected }),
   sourceStatus: () => invoke<SourceStatus>("source_status"),
