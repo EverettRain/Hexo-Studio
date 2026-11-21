@@ -22,8 +22,14 @@ pub fn data_dir() -> PathBuf {
     }
 }
 
-pub fn settings_path() -> PathBuf {
-    data_dir().join("settings.json")
+/// Writes JSON through a temporary file, so a crash never leaves half a file.
+pub fn write_json(path: &std::path::Path, value: &impl serde::Serialize) -> Result<(), String> {
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    let body = serde_json::to_vec_pretty(value).map_err(|e| e.to_string())?;
+    std::fs::write(&tmp, body).and_then(|_| std::fs::rename(&tmp, path)).map_err(|e| e.to_string())
 }
 
 fn log_path() -> PathBuf {

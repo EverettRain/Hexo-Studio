@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
 import { api, errorText, onEvent, type AppInfo, type BlogStatus, type PostSummary, type PreviewState } from "@/lib/api";
 import { PageSlot } from "@/lib/pageActive";
-import { useTheme } from "@/lib/theme";
+import { useTheme } from "@/lib/preferences";
 import { ConfigPage } from "@/pages/ConfigPage";
 import { DeployPage } from "@/pages/DeployPage";
 import { EditorPage } from "@/pages/EditorPage";

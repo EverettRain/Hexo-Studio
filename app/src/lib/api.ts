@@ -6,6 +6,24 @@ export interface AppInfo {
   dataDir: string;
 }
 
+/** The person using the app (one for now). */
+export interface UserView {
+  name: string;
+  /** A data: URL; null shows the name's first letter. */
+  avatar: string | null;
+}
+
+export type ThemeMode = "system" | "light" | "dark";
+
+/** What only the interface reads and writes, kept in the user's preferences. */
+export interface UiPreferences {
+  mode: ThemeMode;
+  /** The editor's preview column as a share of its width; null until dragged. */
+  previewShare: number | null;
+  /** Values kept in the WebView's storage before preferences existed were brought over. */
+  webStorageMigrated: boolean;
+}
+
 export interface Deployer {
   kind: string;
   repo: string | null;
@@ -390,6 +408,12 @@ export interface ImportReport {
 export const api = {
   appInfo: () => invoke<AppInfo>("app_info"),
   restartApp: () => invoke<void>("restart_app"),
+  userProfile: () => invoke<UserView>("user_profile"),
+  setUserName: (name: string) => invoke<UserView>("set_user_name", { name }),
+  setUserAvatar: (path: string) => invoke<UserView>("set_user_avatar", { path }),
+  clearUserAvatar: () => invoke<UserView>("clear_user_avatar"),
+  uiPreferences: () => invoke<UiPreferences>("ui_preferences"),
+  saveUiPreferences: (ui: UiPreferences) => invoke<void>("save_ui_preferences", { ui }),
   recentProjects: () => invoke<ProjectCard[]>("recent_projects"),
   openProject: (path: string) => invoke<BlogStatus>("open_project", { path }),
   closeProject: () => invoke<void>("close_project"),

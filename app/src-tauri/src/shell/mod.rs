@@ -63,6 +63,12 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::app_info,
             commands::restart_app,
+            commands::user_profile,
+            commands::set_user_name,
+            commands::set_user_avatar,
+            commands::clear_user_avatar,
+            commands::ui_preferences,
+            commands::save_ui_preferences,
             commands::recent_projects,
             commands::open_project,
             commands::close_project,

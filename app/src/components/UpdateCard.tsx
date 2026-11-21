@@ -14,7 +14,7 @@ type Phase =
 
 const mb = (n: number) => (n / 1048576).toFixed(1);
 
-/** The welcome page's version line: checks GitHub Releases once, offers to install a newer one. */
+/** The version line (welcome page, settings' About): checks GitHub Releases once, offers to install a newer one. */
 export function UpdateCard({ version }: { version: string | null }) {
   const [phase, setPhase] = useState<Phase>({ kind: "checking" });
 

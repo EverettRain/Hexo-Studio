@@ -17,6 +17,7 @@ import { ownFileName } from "@/lib/imageImport";
 import { describeImage, indexImages } from "@/lib/images";
 import { wordCount, type FormatState } from "@/lib/markdownCommands";
 import { usePageActive } from "@/lib/pageActive";
+import { usePreferences } from "@/lib/preferences";
 import { cn } from "@/lib/utils";
 
 interface EditorPageProps {
@@ -37,17 +38,6 @@ type SaveState = "saved" | "dirty" | "saving" | "conflict" | "error";
 
 /** Typing stops this long before the post is saved (and the preview refreshed). */
 const AUTOSAVE_MS = 1000;
-const PREVIEW_WIDTH_KEY = "hexo-studio.preview-width";
-
-function readWidth(): number {
-  try {
-    const v = Number(localStorage.getItem(PREVIEW_WIDTH_KEY));
-    return v >= 0.2 && v <= 0.8 ? v : 0.5;
-  } catch {
-    return 0.5;
-  }
-}
-
 /** Where the page of a post is, under the site root. */
 function sitePath(config: BlogConfigView, summary: PostSummary | undefined): string | null {
   return summary?.urlPath ? `${config.root}${summary.urlPath}` : null;
@@ -63,7 +53,10 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
   const [saveError, setSaveError] = useState<string | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
   const [showPreview, setShowPreview] = useState(true);
-  const [width, setWidth] = useState(readWidth);
+  const prefs = usePreferences();
+  const [width, setWidth] = useState(prefs.ui.previewShare ?? 0.5);
+  // Saved once the drag ends; a ref, because the drag's handlers outlive this render.
+  const saveShare = useRef((w: number) => prefs.update({ previewShare: w }));
   const [publishing, setPublishing] = useState<"ask" | "busy" | null>(null);
   const editor = useRef<EditorHandle>(null);
   const active = usePageActive();
@@ -296,11 +289,7 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
       window.removeEventListener("pointerup", up);
       document.body.classList.remove("col-resizing");
       setWidth((w) => {
-        try {
-          localStorage.setItem(PREVIEW_WIDTH_KEY, String(w));
-        } catch {
-          /* storage unavailable */
-        }
+        saveShare.current(w);
         return w;
       });
     };

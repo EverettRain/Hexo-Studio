@@ -51,6 +51,17 @@ fn decode_with_sips(_bytes: &[u8], _ext: &str) -> Result<DynamicImage, String> {
     Err("不支持的图片格式".into())
 }
 
+/// The middle square of an image, scaled to `edge` pixels, as PNG (the user's avatar).
+pub fn square_png(bytes: &[u8], ext: &str, edge: u32) -> Result<Vec<u8>, String> {
+    let img = decode(bytes).or_else(|first| decode_with_sips(bytes, ext).map_err(|_| format!("无法读取这张图片：{first}")))?;
+    let side = img.width().min(img.height());
+    let img = img.crop_imm((img.width() - side) / 2, (img.height() - side) / 2, side, side);
+    let img = if side > edge { img.resize_exact(edge, edge, image::imageops::FilterType::Lanczos3) } else { img };
+    let mut out = Cursor::new(Vec::new());
+    DynamicImage::ImageRgba8(img.to_rgba8()).write_to(&mut out, image::ImageFormat::Png).map_err(|e| format!("无法保存头像：{e}"))?;
+    Ok(out.into_inner())
+}
+
 pub fn to_webp(bytes: &[u8], ext: &str, quality: u8, max_edge: u32) -> Result<Encoded, String> {
     let img = decode(bytes).or_else(|first| decode_with_sips(bytes, ext).map_err(|_| format!("无法读取这张图片：{first}")))?;
     let (w, h) = fit(img.width(), img.height(), max_edge);
@@ -70,6 +81,34 @@ mod tests {
         let mut out = Cursor::new(Vec::new());
         img.write_to(&mut out, format).unwrap();
         out.into_inner()
+    }
+
+    #[test]
+    fn an_avatar_is_the_middle_square_scaled_down() {
+        // Arrange: 400 × 200, red in the middle half, blue at both ends.
+        let img = RgbImage::from_fn(400, 200, |x, _| if (100..300).contains(&x) { Rgb([255, 0, 0]) } else { Rgb([0, 0, 255]) });
+        let bytes = encoded(DynamicImage::ImageRgb8(img), ImageFormat::Png);
+        let edge = 64;
+
+        // Act
+        let png = square_png(&bytes, "png", edge).unwrap();
+
+        // Assert
+        let out = image::load_from_memory(&png).unwrap().to_rgba8();
+        assert_eq!(out.dimensions(), (edge, edge));
+        assert!(out.pixels().all(|p| p[0] > 200 && p[2] < 50), "only the red middle remains");
+    }
+
+    #[test]
+    fn a_small_avatar_is_not_scaled_up() {
+        // Arrange
+        let bytes = encoded(DynamicImage::ImageRgb8(RgbImage::new(30, 40)), ImageFormat::Png);
+
+        // Act
+        let png = square_png(&bytes, "png", 256).unwrap();
+
+        // Assert
+        assert_eq!(image::load_from_memory(&png).unwrap().to_rgba8().dimensions(), (30, 30));
     }
 
     #[test]

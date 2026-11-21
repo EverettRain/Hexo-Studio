@@ -2,7 +2,9 @@ import { ChevronsUpDown, FileText, GitBranch, Images, MonitorPlay, Moon, Rocket,
 import type React from "react";
 import { useLayoutEffect, useRef, useState } from "react";
 import appIcon from "@/assets/app-icon.png";
+import { Avatar } from "@/components/Avatar";
 import type { PreviewState } from "@/lib/api";
+import { usePreferences } from "@/lib/preferences";
 import type { ThemeMode } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
@@ -23,7 +25,6 @@ const main: NavItem[] = [
   { id: "source", label: "源码", icon: GitBranch },
   { id: "deploy", label: "部署", icon: Rocket },
 ];
-const footer: NavItem[] = [{ id: "settings", label: "设置", icon: Settings }];
 
 const nextTheme: Record<ThemeMode, ThemeMode> = { system: "light", light: "dark", dark: "system" };
 const themeLabel: Record<ThemeMode, string> = { system: "跟随系统", light: "浅色", dark: "深色" };
@@ -79,13 +80,16 @@ export function AppShell({ activePage, onPageChange, theme, onThemeChange, previ
   const refs = useRef<Partial<Record<PageId, HTMLButtonElement | null>>>({});
   const nav = useRef<HTMLDivElement>(null);
   const [thumb, setThumb] = useState<number | null>(null);
+  const { user } = usePreferences();
+  const onSettings = activePage === "settings";
 
   // Sliding highlight behind the active row.
   useLayoutEffect(() => {
     const measure = () => {
       const el = refs.current[activePage];
       const box = nav.current;
-      if (el && box) setThumb(el.getBoundingClientRect().top - box.getBoundingClientRect().top);
+      // Settings has no row here: the highlight hides while it is open.
+      setThumb(el && box ? el.getBoundingClientRect().top - box.getBoundingClientRect().top : null);
     };
     measure();
     window.addEventListener("resize", measure);
@@ -125,10 +129,9 @@ export function AppShell({ activePage, onPageChange, theme, onThemeChange, previ
             />
           )}
           <div className="flex-1 space-y-0.5 overflow-y-auto pb-2 pt-1">{main.map(row)}</div>
-          <div className="space-y-0.5 border-t-[0.5px] border-line-2 py-2">{footer.map(row)}</div>
         </div>
 
-        <div className="flex h-9 shrink-0 items-center gap-2 px-[18px] pb-1 text-[11.5px] text-muted" title={preview.state === "failed" ? preview.message : undefined}>
+        <div className="flex h-8 shrink-0 items-center gap-2 px-[18px] text-[11.5px] text-muted" title={preview.state === "failed" ? preview.message : undefined}>
           <span
             className={cn(
               "h-[7px] w-[7px] shrink-0 rounded-full",
@@ -136,6 +139,26 @@ export function AppShell({ activePage, onPageChange, theme, onThemeChange, previ
             )}
           />
           <span className="truncate">{previewText(preview)}</span>
+        </div>
+
+        {/* The user, as in Claude Desktop: who is working here, and the way into settings. */}
+        <div className="shrink-0 border-t-[0.5px] border-line-2 p-2">
+          <div className={cn("flex h-11 items-center gap-2.5 rounded-[9px] pl-2 pr-1", onSettings ? "bg-card shadow-edge dark:bg-white/[.07]" : "")}>
+            <Avatar user={user} className="h-7 w-7 text-[12px]" />
+            <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{user?.name ?? ""}</span>
+            <button
+              onClick={() => onPageChange("settings")}
+              title="设置"
+              aria-label="设置"
+              aria-current={onSettings ? "page" : undefined}
+              className={cn(
+                "flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-[7px] hover:bg-pill hover:text-fg",
+                onSettings ? "text-fg" : "text-muted",
+              )}
+            >
+              <Settings className="h-[15px] w-[15px]" />
+            </button>
+          </div>
         </div>
       </aside>
 

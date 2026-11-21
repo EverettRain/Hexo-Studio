@@ -10,9 +10,10 @@ use crate::domain::task::Task;
 use crate::domain::template::{self, Credits, NewBlog, Template};
 use crate::infra::blog::{self, Blog, ConfigText, ConfigWrite, PostFile, PostSummary, WriteOutcome};
 use crate::infra::node_env::{self, NodeEnv};
+use crate::infra::preferences::UiPreferences;
 use crate::infra::project::{Profile, ProjectSettings, UploadSettings};
 use crate::infra::store::Store;
-use crate::infra::{git, keychain, paths, project, settings};
+use crate::infra::{git, keychain, paths, preferences, project, user};
 use crate::service::adopt;
 use crate::service::create::{Creator, Progress};
 use crate::service::images;
@@ -50,7 +51,7 @@ fn current_blog(ws: &Workspace) -> Result<Blog, String> {
 }
 
 fn current_node() -> Result<NodeEnv, String> {
-    node_env::resolve(settings::load().node_path.as_deref())
+    node_env::resolve(preferences::load().node_path.as_deref())
 }
 
 #[derive(Serialize)]
@@ -68,6 +69,65 @@ pub fn app_info(app: AppHandle) -> AppInfo {
 #[tauri::command]
 pub fn restart_app(app: AppHandle) {
     app.restart();
+}
+
+// ---- the user ------------------------------------------------------------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UserView {
+    name: String,
+    /// A `data:` URL of the PNG; `None` shows the name's first letter.
+    avatar: Option<String>,
+}
+
+fn user_view() -> Result<UserView, String> {
+    use base64::Engine as _;
+    let avatar = user::avatar().map(|png| format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(png)));
+    Ok(UserView { name: user::profile()?.name, avatar })
+}
+
+#[tauri::command]
+pub async fn user_profile() -> Result<UserView, String> {
+    blocking(user_view).await
+}
+
+#[tauri::command]
+pub async fn set_user_name(name: String) -> Result<UserView, String> {
+    blocking(move || {
+        user::set_name(&name)?;
+        user_view()
+    })
+    .await
+}
+
+/// The picture at `path` (chosen in a dialog), cut to its middle square.
+#[tauri::command]
+pub async fn set_user_avatar(path: String) -> Result<UserView, String> {
+    blocking(move || {
+        user::set_avatar(Path::new(&path))?;
+        user_view()
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn clear_user_avatar() -> Result<UserView, String> {
+    blocking(|| {
+        user::clear_avatar()?;
+        user_view()
+    })
+    .await
+}
+
+#[tauri::command]
+pub async fn ui_preferences() -> Result<UiPreferences, String> {
+    blocking(|| Ok(preferences::load().ui)).await
+}
+
+#[tauri::command]
+pub async fn save_ui_preferences(ui: UiPreferences) -> Result<(), String> {
+    blocking(move || preferences::update(|p| p.ui = ui).map(|_| ())).await
 }
 
 // ---- projects -----------------------------------------------------------------------------
@@ -94,7 +154,7 @@ fn folder_name(path: &Path) -> String {
 pub async fn recent_projects() -> Result<Vec<ProjectCard>, String> {
     blocking(|| {
         let path_var = current_node().map(|e| e.path_var).unwrap_or_else(|_| "/usr/bin:/bin:/usr/local/bin:/opt/homebrew/bin".into());
-        Ok(settings::load()
+        Ok(preferences::load()
             .recent
             .into_iter()
             .map(|r| {
@@ -128,7 +188,7 @@ pub async fn open_project(ws: Ws<'_>, preview: Prev<'_>, runner: Run<'_>, path: 
         preview.stop();
         Preview::end_stale(&root2);
         project::prepare(&root2)?;
-        settings::update(|s| s.remember(&path, jiff::Timestamp::now().as_second()))?;
+        preferences::update(|s| s.remember(&path, jiff::Timestamp::now().as_second()))?;
         Ok(())
     })
     .await?;
@@ -155,7 +215,7 @@ pub async fn close_project(ws: Ws<'_>, preview: Prev<'_>, runner: Run<'_>) -> Re
 
 #[tauri::command]
 pub fn forget_project(path: String) -> Result<(), String> {
-    settings::update(|s| s.forget(&path)).map(|_| ())
+    preferences::update(|s| s.forget(&path)).map(|_| ())
 }
 
 // ---- new blogs -----------------------------------------------------------------------------
@@ -175,7 +235,7 @@ pub struct NewBlogForm {
 #[tauri::command]
 pub async fn new_blog_form() -> Result<NewBlogForm, String> {
     blocking(|| {
-        let parent = settings::load()
+        let parent = preferences::load()
             .recent
             .first()
             .and_then(|r| Path::new(&r.path).parent().filter(|p| p.is_dir()).map(Path::to_path_buf))
@@ -260,7 +320,7 @@ pub struct BlogStatus {
 }
 
 fn status(root: Option<&Path>) -> BlogStatus {
-    let s = settings::load();
+    let s = preferences::load();
     let env = node_env::resolve(s.node_path.as_deref());
     let node = match &env {
         Ok(env) => NodeView {
@@ -307,7 +367,7 @@ pub async fn set_node_path(ws: Ws<'_>, path: Option<String>) -> Result<BlogStatu
     let root = ws.project.lock().unwrap().clone();
     blocking(move || {
         let path = path.map(|p| p.trim().to_string()).filter(|p| !p.is_empty());
-        settings::update(|s| s.node_path = path)?;
+        preferences::update(|s| s.node_path = path)?;
         Ok(status(root.as_deref()))
     })
     .await
@@ -621,7 +681,7 @@ fn storage_view(root: &Path) -> Result<StorageView, String> {
         name: s.name.clone(),
         profiles,
         active: s.active_profile().map(|p| p.id.clone()),
-        backup_dir: settings::load().backup_dir().display().to_string(),
+        backup_dir: preferences::load().backup_dir().display().to_string(),
     })
 }
 
@@ -757,7 +817,7 @@ pub async fn save_library_settings(ws: Ws<'_>, input: LibrarySettingsInput) -> R
         s.name = input.name.map(|n| n.trim().to_string()).filter(|n| !n.is_empty());
         project::save_settings(&root, &s)?;
         let backup = input.backup_dir.map(|d| d.trim().to_string()).filter(|d| !d.is_empty());
-        settings::update(|g| g.backup_dir = backup)?;
+        preferences::update(|g| g.backup_dir = backup)?;
         storage_view(&root)
     })
     .await
@@ -865,7 +925,7 @@ pub async fn upload_image_bytes(ws: Ws<'_>, request: tauri::ipc::Request<'_>) ->
         legacy_urls: Vec::new(),
         now,
     };
-    images::ingest(&blog.root, &s, &settings::load().backup_dir(), inc).await
+    images::ingest(&blog.root, &s, &preferences::load().backup_dir(), inc).await
 }
 
 /// Makes a WebP quality and longest edge the active profile's defaults (from the import panel).
@@ -920,7 +980,7 @@ pub async fn image_library(ws: Ws<'_>) -> Result<LibraryView, String> {
         let used = adopt::usages(&blog, &s)?;
         let unadopted = if s.active_profile().is_some() { adopt::plan(&blog, &s, &[])?.len() } else { 0 };
         let checks: BTreeMap<String, images::Check> = project::load_checks(&blog.root);
-        let backup_dir = settings::load().backup_dir();
+        let backup_dir = preferences::load().backup_dir();
         let titles = adopt::sources(&blog).into_iter().filter_map(|src| src.title.map(|t| (src.file, t))).collect();
         let images = catalog
             .images
@@ -1075,7 +1135,7 @@ pub async fn run_adoption(app: AppHandle, ws: Ws<'_>, runner: Run<'_>, checklist
     let rows = read_checklist(checklist)?;
     let s = project::load_settings(&blog.root)?;
     let (today, now) = today_and_now(&blog);
-    adopt::run(&blog, &s, &settings::load().backup_dir(), &rows, &today, now, |p| {
+    adopt::run(&blog, &s, &preferences::load().backup_dir(), &rows, &today, now, |p| {
         let _ = app.emit("adoption-progress", p);
     })
     .await
