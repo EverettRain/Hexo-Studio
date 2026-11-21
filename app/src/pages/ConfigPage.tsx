@@ -406,11 +406,10 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
                         onClick={() => setSelected((s) => ({ ...s, [view]: k }))}
                         aria-current={active ? "true" : undefined}
                         className={cn(
-                          "relative flex h-[46px] w-full items-center gap-2 rounded-lg pl-3 pr-2.5 text-left active:!scale-100",
+                          "flex h-[46px] w-full items-center gap-2 rounded-lg px-3 text-left active:!scale-100",
                           active ? "bg-brand-soft" : "hover:bg-pill",
                         )}
                       >
-                        {active && <span aria-hidden className="absolute inset-y-2.5 left-0 w-[3px] rounded-full bg-brand" />}
                         <span className="min-w-0 flex-1">
                           <span className={cn("block truncate text-[13px] leading-5", k !== SEARCH_PANEL && "font-mono", active ? "font-semibold text-brand" : "text-fg")}>{sectionTitle(k)}</span>
                           <span className={cn("block truncate text-[11.5px] leading-4", active ? "text-brand/75" : "text-muted")}>{hint}</span>
