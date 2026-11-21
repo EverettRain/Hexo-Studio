@@ -108,7 +108,11 @@ function ProblemCard({ problem }: { problem: Problem }) {
 
 function RunLog({ run }: { run: Run }) {
   const end = useRef<HTMLDivElement>(null);
-  useEffect(() => end.current?.scrollIntoView({ block: "end" }), [run.lines.length, run.id]);
+  // A block body: newer engines return a Promise from scrollIntoView, which React would take
+  // for the effect's cleanup.
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "end" });
+  }, [run.lines.length, run.id]);
   return (
     <div className="selectable min-h-0 flex-1 overflow-auto rounded-lg bg-card-2 px-3 py-2 font-mono text-[11.5px] leading-[18px] shadow-card">
       {run.notes.map((n, i) => (

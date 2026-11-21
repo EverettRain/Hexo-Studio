@@ -17,7 +17,11 @@ interface PreviewPaneProps {
 
 export function LogView({ lines, className }: { lines: LogLine[]; className?: string }) {
   const end = useRef<HTMLDivElement>(null);
-  useEffect(() => end.current?.scrollIntoView({ block: "end" }), [lines.length]);
+  // A block body: newer engines return a Promise from scrollIntoView, which React would take
+  // for the effect's cleanup.
+  useEffect(() => {
+    end.current?.scrollIntoView({ block: "end" });
+  }, [lines.length]);
   return (
     <div className={cn("selectable overflow-auto bg-card-2 px-3 py-2 font-mono text-[11.5px] leading-[18px]", className)}>
       {lines.length === 0 && <div className="text-muted">没有输出</div>}

@@ -172,7 +172,9 @@ export function SourcePage() {
     ).finally(done);
   }, []);
 
-  useEffect(() => refresh(), [refresh]);
+  useEffect(() => {
+    refresh();
+  }, [refresh]);
   useOnShow(refresh);
 
   const loadMore = async () => {
