@@ -4,7 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { Input, Label } from "@/components/ui/input";
-import { api, errorText, onEvent, type BlogTemplate, type CreateProgress, type CreateStep, type NewBlogForm } from "@/lib/api";
+import { api, errorText, onEvent, type BlogTemplate, type CreateProgress, type CreateStep, type Credits, type NewBlogForm } from "@/lib/api";
 import { cn } from "@/lib/utils";
 
 interface NewBlogDialogProps {
@@ -103,6 +103,7 @@ export function NewBlogDialog({ open, onClose, onCreated }: NewBlogDialogProps) 
       title="新建博客"
       description={showSteps ? target : "建一个可以直接预览、写作的 Hexo 博客：纯 Hexo，或者从模板开始。"}
       className="max-w-[760px]"
+      bodyClassName="flex flex-col overflow-hidden"
       footer={
         phase.kind === "form" ? (
           <>
@@ -128,8 +129,8 @@ export function NewBlogDialog({ open, onClose, onCreated }: NewBlogDialogProps) 
       }
     >
       {/* As in an IDE's new-project window: templates on the left, the chosen one's settings on the right. */}
-      <div className="-mx-5 -my-3 flex h-[420px] border-y border-line">
-        <div className="flex w-[200px] shrink-0 flex-col bg-bg/70 p-2">
+      <div className="mt-3 flex h-[480px] min-h-0 shrink border-y border-line">
+        <div className="flex w-[200px] shrink-0 flex-col overflow-y-auto bg-bg/70 p-2">
           {/* Plain Hexo is not a template: it stands apart, above them. */}
           <button
             type="button"
@@ -173,6 +174,7 @@ export function NewBlogDialog({ open, onClose, onCreated }: NewBlogDialogProps) 
               <p className="mt-1 text-[12.5px] leading-[19px] text-fg-2">
                 与官方 hexo init 的结果相同：Hexo 的基础骨架和它自带的默认主题 landscape，不另装主题和插件，之后可以自己换主题。
               </p>
+              {!showSteps && form && <CreditsCard credits={form.hexo} />}
             </div>
           )}
           {chosen && (
@@ -190,6 +192,7 @@ export function NewBlogDialog({ open, onClose, onCreated }: NewBlogDialogProps) 
                 </button>
               </div>
               <p className="mt-1 text-[12.5px] leading-[19px] text-fg-2">{chosen.description}</p>
+              {!showSteps && <CreditsCard credits={chosen.credits} />}
             </div>
           )}
 
@@ -265,5 +268,36 @@ export function NewBlogDialog({ open, onClose, onCreated }: NewBlogDialogProps) 
         </div>
       </div>
     </Dialog>
+  );
+}
+
+/** `https://github.com/a/b` → `a/b`; other sites without the scheme and trailing slash. */
+const linkText = (url: string) => url.replace(/^https:\/\/github\.com\//, "").replace(/^https?:\/\//, "").replace(/\/$/, "");
+
+/** Who made it and where to read about it; every link opens in the browser. */
+function CreditsCard({ credits }: { credits: Credits }) {
+  const link = (label: string, url: string, text = linkText(url)) => (
+    <>
+      <span className="text-muted">{label}</span>
+      <button
+        type="button"
+        title={url}
+        onClick={() => void api.openUrl(url)}
+        className="inline-flex min-w-0 items-center gap-1 justify-self-start text-left text-fg-2 hover:text-brand active:!scale-100"
+      >
+        <span className="truncate">{text}</span>
+        <ExternalLink className="h-3 w-3 shrink-0" />
+      </button>
+    </>
+  );
+  return (
+    <div className="mt-3 grid grid-cols-[auto_1fr_auto_1fr] items-center gap-x-3 gap-y-1.5 rounded-lg bg-bg px-3 py-2.5 text-[12px]">
+      {link("作者", credits.authorUrl, credits.author)}
+      <span className="text-muted">许可</span>
+      <span className="text-fg-2">{credits.license}</span>
+      {link("官网", credits.website)}
+      {link("文档", credits.docs)}
+      {link("GitHub", credits.repo)}
+    </div>
   );
 }

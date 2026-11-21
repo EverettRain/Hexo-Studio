@@ -10,12 +10,14 @@ interface DialogProps {
   children?: ReactNode;
   footer?: ReactNode;
   className?: string;
+  /** Replaces the body's padding and scrolling, for content that lays itself out (split panes). */
+  bodyClassName?: string;
 }
 
 /** Open dialogs, topmost last; Escape only closes the topmost. */
 const stack: string[] = [];
 
-export function Dialog({ open, onClose, title, description, children, footer, className }: DialogProps) {
+export function Dialog({ open, onClose, title, description, children, footer, className, bodyClassName }: DialogProps) {
   const key = useId();
   const close = useRef(onClose);
   close.current = onClose;
@@ -55,7 +57,7 @@ export function Dialog({ open, onClose, title, description, children, footer, cl
             <X className="h-4 w-4" />
           </button>
         </div>
-        {children && <div className="min-h-0 overflow-y-auto px-5 py-3">{children}</div>}
+        {children && <div className={cn("min-h-0", bodyClassName ?? "overflow-y-auto px-5 py-3")}>{children}</div>}
         {footer && <div className="flex justify-end gap-2 px-5 pb-4 pt-2">{footer}</div>}
       </div>
     </div>

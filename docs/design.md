@@ -433,7 +433,8 @@ M5 开工前确认：
 
 欢迎页“新建博客…”：选纯 Hexo 或一个模板、填标题与作者、选放在哪个文件夹，创建完直接打开。
 
-- **界面**照 Visual Studio / JetBrains 的新建项目窗口左右分栏：左栏最上面是“纯 Hexo”，分隔线下是“模板”列表；右栏是选中项的说明和表单（标题、作者、位置、文件夹名），创建后右栏换成步骤进度与 npm 日志，左栏锁定。
+- **界面**照 Visual Studio / JetBrains 的新建项目窗口左右分栏：左栏最上面是“纯 Hexo”，分隔线下是“模板”列表；右栏是选中项的说明、来源信息卡（作者、许可、官网、文档、GitHub 仓库；纯 Hexo 显示 Hexo 官方的）和表单（标题、作者、位置、文件夹名），创建后右栏换成步骤进度与 npm 日志，左栏锁定。左右两栏各自滚动，对话框主体不滚动，窗口矮时分栏跟着变矮。
+- 来源信息写在 `domain/template.rs`（`Credits`），信息卡里的链接只放行这些地址（`open_url` 按列表核对）。
 - **纯 Hexo** 不算模板：结果与官方 `hexo init` 相同，即基础骨架加 hexo-starter 自带的 landscape 主题（`hexo-theme-landscape`、`hexo-renderer-ejs`、`hexo-renderer-stylus`），没有“下载主题”这一步。完全不带主题的博客 Hexo 生成不出页面，所以不做。
 - **模板** = Hexo 基础骨架 + 一个主题。目前只有 anzhiyu（`domain/template.rs` 的列表，加模板只加一项）。
 - **基础骨架**照 `hexo init`：`_config.yml`、`scaffolds/`、`source/_posts/hello-world.md` 取自 hexo-cli 4.3.2 自带的 `assets/`（`hexo init` 克隆失败时用的就是它，MIT），`.gitignore` 取自 hexo-starter。它们随应用打包，不在创建时联网拉 hexo-starter。

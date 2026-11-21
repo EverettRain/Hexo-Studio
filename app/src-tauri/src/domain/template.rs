@@ -2,6 +2,26 @@
 
 use serde::{Deserialize, Serialize};
 
+/// Who made a template (or Hexo itself) and where to read about it.
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Credits {
+    pub author: &'static str,
+    /// The author's own site.
+    pub author_url: &'static str,
+    /// The official site, with a live preview for a theme.
+    pub website: &'static str,
+    pub docs: &'static str,
+    pub repo: &'static str,
+    pub license: &'static str,
+}
+
+impl Credits {
+    fn links(&self) -> [&'static str; 4] {
+        [self.author_url, self.website, self.docs, self.repo]
+    }
+}
+
 /// A blog to start from: Hexo's base plus one theme.
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -15,17 +35,24 @@ pub struct Template {
     pub package: &'static str,
     /// Plugins the theme needs installed in the blog (its renderers).
     pub plugins: &'static [&'static str],
-    pub homepage: &'static str,
+    pub credits: Credits,
 }
 
 pub const TEMPLATES: [Template; 1] = [Template {
     id: "anzhiyu",
     name: "安知鱼 anzhiyu",
-    description: "卡片式设计的中文主题，自带文章目录、侧栏卡片、评论与搜索等，配置页对它有专门的分组。",
+    description: "卡片式设计的中文主题，基于 butterfly 修改，自带文章目录、侧栏卡片、评论与搜索等，配置页对它有专门的分组。",
     theme: "anzhiyu",
     package: "hexo-theme-anzhiyu",
     plugins: &["hexo-renderer-pug", "hexo-renderer-stylus"],
-    homepage: "https://docs.anheyu.com/",
+    credits: Credits {
+        author: "安知鱼（anzhiyu）",
+        author_url: "https://blog.anheyu.com/",
+        website: "https://hexo.anheyu.com/",
+        docs: "https://docs.anheyu.com/",
+        repo: "https://github.com/anzhiyu-c/hexo-theme-anzhiyu",
+        license: "GPL-3.0",
+    },
 }];
 
 pub fn find(id: &str) -> Option<&'static Template> {
@@ -47,6 +74,20 @@ pub const BASE_PACKAGES: [&str; 7] = [
 /// landscape, and the renderers it needs.
 pub const PLAIN_THEME: &str = "landscape";
 pub const PLAIN_PACKAGES: [&str; 3] = ["hexo-renderer-ejs", "hexo-renderer-stylus", "hexo-theme-landscape"];
+
+pub const HEXO_CREDITS: Credits = Credits {
+    author: "Hexo 团队",
+    author_url: "https://github.com/hexojs",
+    website: "https://hexo.io/zh-cn/",
+    docs: "https://hexo.io/zh-cn/docs/",
+    repo: "https://github.com/hexojs/hexo",
+    license: "MIT",
+};
+
+/// One of the links shown with Hexo or a template, which the page may open in the browser.
+pub fn is_credit_link(url: &str) -> bool {
+    TEMPLATES.iter().map(|t| &t.credits).chain([&HEXO_CREDITS]).any(|c| c.links().contains(&url))
+}
 
 /// The lowest Node the Hexo that `npm install hexo` gives today runs on (Hexo 8's `engines`).
 pub const MIN_NODE: (u64, u64) = (20, 19);
@@ -218,6 +259,16 @@ mod tests {
         assert_eq!(zone_from_localtime("/var/db/timezone/zoneinfo/Asia/Taipei").as_deref(), Some("Asia/Taipei"));
         assert_eq!(zone_from_localtime("/usr/share/zoneinfo/UTC").as_deref(), Some("UTC"));
         assert_eq!(zone_from_localtime("/etc/other"), None);
+    }
+
+    #[test]
+    fn only_the_shown_links_may_be_opened() {
+        // Act / Assert
+        for c in TEMPLATES.iter().map(|t| &t.credits).chain([&HEXO_CREDITS]) {
+            assert!(c.links().iter().all(|l| l.starts_with("https://") && is_credit_link(l)));
+        }
+        assert!(!is_credit_link("https://example.com/"));
+        assert!(!is_credit_link(&format!("{}x", HEXO_CREDITS.docs)));
     }
 
     #[test]

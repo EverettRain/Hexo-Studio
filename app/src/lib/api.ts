@@ -42,6 +42,18 @@ export interface BlogStatus {
   node: NodeView;
 }
 
+/** Who made a template (or Hexo) and where to read about it. */
+export interface Credits {
+  author: string;
+  /** The author's own site. */
+  authorUrl: string;
+  /** The official site, with a live preview for a theme. */
+  website: string;
+  docs: string;
+  repo: string;
+  license: string;
+}
+
 /** Hexo's base plus one theme, to start a new blog from. */
 export interface BlogTemplate {
   id: string;
@@ -51,11 +63,13 @@ export interface BlogTemplate {
   /** The theme on npm. */
   package: string;
   plugins: string[];
-  homepage: string;
+  credits: Credits;
 }
 
 export interface NewBlogForm {
   templates: BlogTemplate[];
+  /** Shown with plain Hexo. */
+  hexo: Credits;
   /** Where the last opened blog is, else the home folder. */
   parent: string;
   /** git's user.name; empty without one. */

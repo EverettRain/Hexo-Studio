@@ -7,7 +7,7 @@ use crate::domain::permalink;
 use crate::domain::source::{Commit, CommitDetail, Status as SourceStatus};
 use crate::domain::storage::Storage;
 use crate::domain::task::Task;
-use crate::domain::template::{self, NewBlog, Template};
+use crate::domain::template::{self, Credits, NewBlog, Template};
 use crate::infra::blog::{self, Blog, ConfigText, ConfigWrite, PostFile, PostSummary, WriteOutcome};
 use crate::infra::node_env::{self, NodeEnv};
 use crate::infra::project::{Profile, ProjectSettings, UploadSettings};
@@ -164,6 +164,8 @@ pub fn forget_project(path: String) -> Result<(), String> {
 #[serde(rename_all = "camelCase")]
 pub struct NewBlogForm {
     templates: Vec<Template>,
+    /// Shown with plain Hexo.
+    hexo: Credits,
     /// Where the last opened blog is, else the home folder.
     parent: String,
     /// git's `user.name`, empty without one.
@@ -179,7 +181,7 @@ pub async fn new_blog_form() -> Result<NewBlogForm, String> {
             .and_then(|r| Path::new(&r.path).parent().filter(|p| p.is_dir()).map(Path::to_path_buf))
             .unwrap_or_else(paths::home);
         let path_var = current_node().map(|e| e.path_var).unwrap_or_else(|_| "/usr/bin:/bin".into());
-        Ok(NewBlogForm { templates: template::TEMPLATES.to_vec(), parent: parent.display().to_string(), author: git::user_name(&path_var).unwrap_or_default() })
+        Ok(NewBlogForm { templates: template::TEMPLATES.to_vec(), hexo: template::HEXO_CREDITS, parent: parent.display().to_string(), author: git::user_name(&path_var).unwrap_or_default() })
     })
     .await
 }
@@ -558,10 +560,10 @@ pub fn list_runs(runner: Run<'_>) -> Vec<RunRecord> {
 }
 
 /// Opens a link in the browser: GitHub pages (push protection's unblock links, plugins' sources),
-/// plugins' npm pages and the preview.
+/// plugins' npm pages, the preview, and the sites of Hexo and the templates.
 #[tauri::command]
 pub fn open_url(app: AppHandle, url: String) -> Result<(), String> {
-    if !(url.starts_with("https://github.com/") || url.starts_with("https://www.npmjs.com/package/") || url.starts_with("http://127.0.0.1:")) {
+    if !(url.starts_with("https://github.com/") || url.starts_with("https://www.npmjs.com/package/") || url.starts_with("http://127.0.0.1:") || template::is_credit_link(&url)) {
         return Err(format!("不打开这个地址：{url}"));
     }
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())
