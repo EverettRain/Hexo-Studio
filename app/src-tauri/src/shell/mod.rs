@@ -3,6 +3,7 @@
 mod commands;
 mod window;
 
+use crate::service::create::Creator;
 use crate::service::preview::{Preview, PreviewEvent};
 use crate::service::runner::{RunEvent, Runner};
 use std::sync::Arc;
@@ -66,6 +67,9 @@ pub fn run() {
             commands::open_project,
             commands::close_project,
             commands::forget_project,
+            commands::new_blog_form,
+            commands::create_blog,
+            commands::cancel_create,
             commands::reveal_project,
             commands::blog_status,
             commands::set_node_path,
@@ -126,6 +130,7 @@ pub fn run() {
             app.manage(Runner::new(preview.clone(), run_sink(handle.clone())));
             app.manage(preview);
             app.manage(commands::Workspace::default());
+            app.manage(Arc::new(Creator::default()));
             window::show_main(&handle);
             Ok(())
         })
@@ -142,6 +147,9 @@ pub fn run() {
                 }
                 if let Some(p) = app.try_state::<Arc<Preview>>() {
                     p.stop();
+                }
+                if let Some(c) = app.try_state::<Arc<Creator>>() {
+                    c.abandon();
                 }
             }
             _ => {}

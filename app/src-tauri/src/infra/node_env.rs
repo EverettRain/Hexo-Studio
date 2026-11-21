@@ -133,6 +133,14 @@ pub fn version(env: &NodeEnv) -> Option<String> {
     out.status.success().then(|| String::from_utf8_lossy(&out.stdout).trim().to_string())
 }
 
+/// The `npm` that comes with this Node (its own folder is first on `PATH`).
+pub fn npm(env: &NodeEnv) -> Result<PathBuf, String> {
+    std::env::split_paths(&env.path_var)
+        .map(|d| d.join("npm"))
+        .find(|p| is_executable(p))
+        .ok_or_else(|| "找不到 npm。它随 Node.js 一起安装，请检查 Node 的安装。".to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

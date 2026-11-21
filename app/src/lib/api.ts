@@ -42,6 +42,40 @@ export interface BlogStatus {
   node: NodeView;
 }
 
+/** Hexo's base plus one theme, to start a new blog from. */
+export interface BlogTemplate {
+  id: string;
+  name: string;
+  description: string;
+  theme: string;
+  /** The theme on npm. */
+  package: string;
+  plugins: string[];
+  homepage: string;
+}
+
+export interface NewBlogForm {
+  templates: BlogTemplate[];
+  /** Where the last opened blog is, else the home folder. */
+  parent: string;
+  /** git's user.name; empty without one. */
+  author: string;
+}
+
+export interface NewBlog {
+  /** Null makes a plain Hexo blog, as `hexo init` does. */
+  template: string | null;
+  parent: string;
+  folder: string;
+  title: string;
+  author: string;
+}
+
+export type CreateStep = "files" | "theme" | "install" | "git";
+
+/** A step begins (those before it are done), or a line of npm's output. */
+export type CreateProgress = { kind: "step"; step: CreateStep } | { kind: "line"; text: string };
+
 export interface ProjectCard {
   path: string;
   name: string;
@@ -346,6 +380,10 @@ export const api = {
   openProject: (path: string) => invoke<BlogStatus>("open_project", { path }),
   closeProject: () => invoke<void>("close_project"),
   forgetProject: (path: string) => invoke<void>("forget_project", { path }),
+  newBlogForm: () => invoke<NewBlogForm>("new_blog_form"),
+  /** Makes the blog (progress as `create-progress` events) and returns its folder. */
+  createBlog: (blog: NewBlog) => invoke<string>("create_blog", { blog }),
+  cancelCreate: () => invoke<void>("cancel_create"),
   revealProject: () => invoke<void>("reveal_project"),
   blogStatus: () => invoke<BlogStatus>("blog_status"),
   setNodePath: (path: string | null) => invoke<BlogStatus>("set_node_path", { path }),

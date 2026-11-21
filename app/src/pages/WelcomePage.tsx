@@ -1,7 +1,8 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { FolderOpen, GitBranch, Moon, Sun, SunMoon, X } from "lucide-react";
+import { FolderOpen, FolderPlus, GitBranch, Moon, Sun, SunMoon, X } from "lucide-react";
 import { useCallback, useEffect, useState } from "react";
 import appIcon from "@/assets/app-icon.png";
+import { NewBlogDialog } from "@/components/NewBlogDialog";
 import { UpdateCard } from "@/components/UpdateCard";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
@@ -36,6 +37,7 @@ export function WelcomePage({ version, theme, onThemeChange, onOpened }: Welcome
   const toast = useToast();
   const [recent, setRecent] = useState<ProjectCard[] | null>(null);
   const [opening, setOpening] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
   const ThemeIcon = theme === "light" ? Sun : theme === "dark" ? Moon : SunMoon;
 
   const load = useCallback(() => {
@@ -82,12 +84,18 @@ export function WelcomePage({ version, theme, onThemeChange, onOpened }: Welcome
               </div>
               <UpdateCard version={version} />
             </div>
-            <Button onClick={() => void choose()} disabled={opening !== null}>
-              <FolderOpen />
-              打开博客文件夹…
-            </Button>
+            <div className="flex flex-col items-start gap-2">
+              <Button onClick={() => void choose()} disabled={opening !== null}>
+                <FolderOpen />
+                打开博客文件夹…
+              </Button>
+              <Button variant="outline" onClick={() => setCreating(true)} disabled={opening !== null}>
+                <FolderPlus />
+                新建博客…
+              </Button>
+            </div>
             <p className="text-[12px] leading-[18px] text-muted">
-              选有 _config.yml 的那个文件夹（博客源码仓库）。打开后会在里面建一个 .hexostudio/ 存放本应用的项目设置，其中 local/ 不进 git。
+              打开时选有 _config.yml 的那个文件夹（博客源码仓库），也可以新建一个。打开后会在里面建一个 .hexostudio/ 存放本应用的项目设置，其中 local/ 不进 git。
             </p>
           </div>
 
@@ -134,6 +142,14 @@ export function WelcomePage({ version, theme, onThemeChange, onOpened }: Welcome
           </div>
         </div>
       </div>
+      <NewBlogDialog
+        open={creating}
+        onClose={() => setCreating(false)}
+        onCreated={(path) => {
+          setCreating(false);
+          void openPath(path);
+        }}
+      />
     </div>
   );
 }

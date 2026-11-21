@@ -7,12 +7,14 @@ use crate::domain::permalink;
 use crate::domain::source::{Commit, CommitDetail, Status as SourceStatus};
 use crate::domain::storage::Storage;
 use crate::domain::task::Task;
+use crate::domain::template::{self, NewBlog, Template};
 use crate::infra::blog::{self, Blog, ConfigText, ConfigWrite, PostFile, PostSummary, WriteOutcome};
 use crate::infra::node_env::{self, NodeEnv};
 use crate::infra::project::{Profile, ProjectSettings, UploadSettings};
 use crate::infra::store::Store;
 use crate::infra::{git, keychain, paths, project, settings};
 use crate::service::adopt;
+use crate::service::create::{Creator, Progress};
 use crate::service::images;
 use crate::service::preview::{self, LogLine, PageProbe, Preview, PreviewState};
 use crate::service::runner::{Run as RunRecord, Runner};
@@ -154,6 +156,54 @@ pub async fn close_project(ws: Ws<'_>, preview: Prev<'_>, runner: Run<'_>) -> Re
 #[tauri::command]
 pub fn forget_project(path: String) -> Result<(), String> {
     settings::update(|s| s.forget(&path)).map(|_| ())
+}
+
+// ---- new blogs -----------------------------------------------------------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NewBlogForm {
+    templates: Vec<Template>,
+    /// Where the last opened blog is, else the home folder.
+    parent: String,
+    /// git's `user.name`, empty without one.
+    author: String,
+}
+
+#[tauri::command]
+pub async fn new_blog_form() -> Result<NewBlogForm, String> {
+    blocking(|| {
+        let parent = settings::load()
+            .recent
+            .first()
+            .and_then(|r| Path::new(&r.path).parent().filter(|p| p.is_dir()).map(Path::to_path_buf))
+            .unwrap_or_else(paths::home);
+        let path_var = current_node().map(|e| e.path_var).unwrap_or_else(|_| "/usr/bin:/bin".into());
+        Ok(NewBlogForm { templates: template::TEMPLATES.to_vec(), parent: parent.display().to_string(), author: git::user_name(&path_var).unwrap_or_default() })
+    })
+    .await
+}
+
+/// Makes a blog from a template, reporting each step and line as `create-progress`; returns its
+/// folder, which the page then opens as a project.
+#[tauri::command]
+pub async fn create_blog(app: AppHandle, creator: State<'_, Arc<Creator>>, blog: NewBlog) -> Result<String, String> {
+    let creator = creator.inner().clone();
+    blocking(move || {
+        let env = current_node()?;
+        let sink = move |p: Progress| {
+            let _ = app.emit("create-progress", p);
+        };
+        creator.create(&env, &blog, &sink).map(|p| p.display().to_string())
+    })
+    .await
+}
+
+#[tauri::command]
+pub fn cancel_create(creator: State<'_, Arc<Creator>>) {
+    let creator = creator.inner().clone();
+    // Ending the process group waits a few seconds at most; not on the main thread.
+    std::thread::spawn(move || creator.cancel());
 }
 
 // ---- the open project ---------------------------------------------------------------------

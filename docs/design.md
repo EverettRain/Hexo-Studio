@@ -16,7 +16,7 @@
 ## 1.1 项目模型（像 VS Code 一样打开项目）
 
 - **启动先到欢迎页**：最近打开的项目（名称、路径、git 远程地址）、“打开文件夹…”、当前版本与检查更新。选一个项目才进入写作界面；写作界面里可以随时“切换项目”回到欢迎页。
-- **项目 = 一个本地 Hexo 博客目录**（通常是 GitHub 上博客源码仓库的本地克隆）。只打开本地文件夹，不做克隆；打开时按 3.1 节校验。
+- **项目 = 一个本地 Hexo 博客目录**（通常是 GitHub 上博客源码仓库的本地克隆）。只打开本地文件夹，不做克隆；打开时按 3.1 节校验。也可以在欢迎页从模板新建一个博客（第 15 节）。
 - **单窗口**：同一时刻只打开一个项目、只有一个预览服务器。切换项目时停止预览；有命令在执行时不允许切换。以后需要再扩展成多窗口。
 - **`.hexostudio/` 目录**：打开项目时在博客根目录自动创建，参照 `.vscode/`：
 
@@ -258,6 +258,7 @@ app/
    2. ✅ 常用分组的专用控件（导航菜单树、评论 / 搜索“选一个再填”、图片字段接图片库、侧边栏卡片、页脚链接）。
    3. ✅ 插件区：按 `package.json` 里已安装的插件列出各自的配置。
    4. ✅ 页面数据：`source/_data` 里友链、相册、装备等的列表编辑。
+6. ✅ **新建博客**（第 15 节）：欢迎页新建纯 Hexo 或从模板新建（目前只有 anzhiyu）。
 
 ## 10. 已确认的决定
 
@@ -427,3 +428,20 @@ M5 开工前确认：
 - `admin.password_hash`、`admin.secret` 不显示、不编辑，文件里原样保留（Q7）。
 - （M5.1 实现）读写在 Rust（`ConfigFile`：`site` / `theme` / `themeDefaults`，主题名不能跳出 `themes/`；`themeDefaults` 只读；不存在的覆盖文件读作空，第一次保存时创建；带内容指纹）。按路径改值在前端 `lib/configYaml.ts`：只替换那个值的文本，改完再解析一遍核对结果，不符就拒绝写入；值没变时文件原样不动（避免把折成多行的长值改写成一行）。在真实的三份配置上对全部 1337 个值各做一次“原值写回”和“改值”，以及 160 次列表增删：原值写回全部逐字节一致，改值只动一行（折成多行的长值除外），没有失败。
 - 现有的图片接管与“使用情况”已经扫描 `_config*.yml` 与主题目录下的 `_config*.yml`，配置里的图片字段换图后，图片库的使用情况保持准确。
+
+## 15. 新建博客（2026-11-21）
+
+欢迎页“新建博客…”：选纯 Hexo 或一个模板、填标题与作者、选放在哪个文件夹，创建完直接打开。
+
+- **界面**照 Visual Studio / JetBrains 的新建项目窗口左右分栏：左栏最上面是“纯 Hexo”，分隔线下是“模板”列表；右栏是选中项的说明和表单（标题、作者、位置、文件夹名），创建后右栏换成步骤进度与 npm 日志，左栏锁定。
+- **纯 Hexo** 不算模板：结果与官方 `hexo init` 相同，即基础骨架加 hexo-starter 自带的 landscape 主题（`hexo-theme-landscape`、`hexo-renderer-ejs`、`hexo-renderer-stylus`），没有“下载主题”这一步。完全不带主题的博客 Hexo 生成不出页面，所以不做。
+- **模板** = Hexo 基础骨架 + 一个主题。目前只有 anzhiyu（`domain/template.rs` 的列表，加模板只加一项）。
+- **基础骨架**照 `hexo init`：`_config.yml`、`scaffolds/`、`source/_posts/hello-world.md` 取自 hexo-cli 4.3.2 自带的 `assets/`（`hexo init` 克隆失败时用的就是它，MIT），`.gitignore` 取自 hexo-starter。它们随应用打包，不在创建时联网拉 hexo-starter。
+- **依赖版本不写死**：`package.json` 只写骨架（含 `"hexo": {"version": ""}`，hexo-cli 靠这个键认出博客目录，Hexo 第一次运行时填上版本），再用 `npm install --save <包名>` 装 hexo-starter 的那组包（去掉 landscape 主题和 ejs 渲染器）加模板要的渲染器，版本取当时最新。2026-11 实测装上的是 Hexo 8.1.2，需要 Node 20.19 以上，创建前检查 Node 版本，不够就直接说明。
+- **主题从 npm 取**：`npm pack hexo-theme-anzhiyu` 再解压到 `themes/anzhiyu/`，与 EverettBlog 一样作为博客仓库里的普通文件（不是子模块、不在 `node_modules`）。走 npm 而不是 `git clone` GitHub，是因为会沿用用户 `~/.npmrc` 里的镜像（国内网络下 GitHub 常常很慢）；代价是 npm 上的版本可能比 GitHub 晚一点（实测 npm 1.7.0、GitHub 1.7.1）。
+- 主题默认配置整份复制成 `_config.anzhiyu.yml`（anzhiyu 文档的做法，也与第 14.4 节“保持整份复制”一致）。`_config.yml` 只改 `title`、`author`、`language: zh-CN`、`timezone`（本机时区）、`theme` 这几行，其余保持官方原样。
+- 最后 `git init`（遵循用户的 `init.defaultBranch`），不做首次提交，留给源码页。
+- **原子性**：先在同一父目录下的隐藏临时文件夹里搭好，全部成功才改名成目标文件夹；失败或取消就删掉这个临时文件夹（它只含本次创建写入的东西）。目标文件夹已存在时不创建。
+- 进度按步骤显示（写入骨架 → 下载主题 → 安装依赖 → 初始化 git），npm 的输出逐行进日志；可以取消（结束整个进程组）。
+- 实测（2026-11-21，npmmirror）：取主题不到 1 秒，安装依赖约 7 秒；建出的博客 `hexo generate` 与 `hexo server --draft` 正常。`tests/create_blog.rs`（设 `HEXO_STUDIO_TEST_CREATE=1` 才跑，要联网）对每个模板和纯 Hexo 各真实创建一次并生成首页，另测安装中途取消后父目录里什么都不留。
+- 创建中途退出应用时，退出流程结束 npm 并删掉临时文件夹。

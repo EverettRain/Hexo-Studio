@@ -38,6 +38,18 @@ pub fn origin(root: &Path, path_var: &std::ffi::OsStr) -> Option<String> {
 const LOCAL_LIMIT: Duration = Duration::from_secs(30);
 const NETWORK_LIMIT: Duration = Duration::from_secs(120);
 
+/// The name git signs commits with (`user.name`); `None` when not set.
+pub fn user_name(path: &OsStr) -> Option<String> {
+    let out = Command::new("git").args(["config", "user.name"]).env("PATH", path).stdin(Stdio::null()).output().ok()?;
+    let name = String::from_utf8_lossy(&out.stdout).trim().to_string();
+    (out.status.success() && !name.is_empty()).then_some(name)
+}
+
+/// Makes `root` a repository; the first branch is named as the user's git config says.
+pub fn init(root: &Path, path: &OsStr) -> Result<(), String> {
+    run(root, path, &["init", "--quiet"], LOCAL_LIMIT).map(|_| ())
+}
+
 /// Runs git in `root` and returns its output; a failure carries what `explain_failure` makes of
 /// git's message. Nothing can wait for input (no terminal, no password prompt), and a command
 /// that outlives `limit` is ended together with the helpers it started (ssh, hooks): they hold

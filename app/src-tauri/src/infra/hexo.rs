@@ -37,19 +37,18 @@ pub fn spawn(
     on_line: impl Fn(Stream, String) + Send + Sync + 'static,
 ) -> Result<Proc, String> {
     let mut cmd = Command::new(&env.node);
-    cmd.arg(hexo_bin)
-        .args(args)
-        .current_dir(blog_root)
-        .env("PATH", &env.path_var)
-        .env("NO_COLOR", "1")
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0);
+    cmd.arg(hexo_bin).args(args).current_dir(blog_root).env("PATH", &env.path_var);
     if let Some(tz) = timezone {
         cmd.env("TZ", tz);
     }
-    let mut child = cmd.spawn().map_err(|e| format!("无法启动 Hexo：{e}"))?;
+    spawn_command(cmd, "Hexo", on_line)
+}
+
+/// Starts `cmd` in its own process group, without input, colours off, every output line to
+/// `on_line`. `label` names it in the error when it cannot start.
+pub fn spawn_command(mut cmd: Command, label: &str, on_line: impl Fn(Stream, String) + Send + Sync + 'static) -> Result<Proc, String> {
+    cmd.env("NO_COLOR", "1").stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).process_group(0);
+    let mut child = cmd.spawn().map_err(|e| format!("无法启动 {label}：{e}"))?;
     let on_line = Arc::new(on_line);
     let readers: Vec<_> = [
         child.stdout.take().map(|s| (Stream::Out, Box::new(s) as Box<dyn Read + Send>)),
