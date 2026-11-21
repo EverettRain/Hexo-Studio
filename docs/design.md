@@ -202,6 +202,7 @@ front-matter 实际使用情况（25 篇文章统计，4 篇草稿字段相同�
 | 源码 | 博客源码仓库（不是部署仓库）：分支与远程的差距、未提交的改动、提交（标题与说明分开，提交全部改动）、推送、拉取（只接受快进）、最近提交（每次 30 条，可加载更多）。左边的框在“改动”和选中的那条提交之间切换：点历史里的提交，框里就显示它的完整说明和改动的文件与行数（不弹窗）；再点一次或点“改动”回到未提交的改动，切换时提交标题与说明保留 |
 | 部署 | 清理 / 生成 / 部署、实时日志、历史运行 |
 | 欢迎页 | 最近项目、打开文件夹、版本与更新 |
+| 配置（M5，未做） | 站点、主题、插件的配置与页面数据，按分组编辑，见第 14 节 |
 | 设置 | 当前项目信息与关闭项目、Node 路径、外观、更新（图片存储改在图片页的存储配置里） |
 
 CSP 需放行：`frame-src http://localhost:*`（预览）、`img-src` 加上 OSS 桶域名（缩略图）。
@@ -243,6 +244,11 @@ app/
 3+. ✅ **图片库**（阿里云 OSS 同样待真实 AccessKey 实测）：按项目统一管理、uid 对象名、`images.json`、图片页、文章里从图库取用、接管旧图、清单导入导出（第 6.2–6.4 节；取代 M3 时按页面分目录的路径与“旧图迁移”）。
 4. **M4 图片库与完善**：图片库浏览 / 搜索 / 删除 / 插入；未引用检测；封面从图片库选择；外部改动检测；（可选）即时 Markdown 预览。
    - ✅ 已做：预览页（独立启停 `hexo server`）与源码页（git 状态、提交、推送、拉取）；见第 10 节“源码仓库”各条。
+5. **M5 配置管理**（第 14 节），每一步都能端到端使用：
+   1. 配置页 + 通用 YAML 树编辑器：三处配置文件的全部字段都能看、能改，保留注释与写法，标出与主题默认不同的值，保存后提示重启预览。
+   2. 常用分组的专用控件（导航菜单树、评论 / 搜索“选一个再填”、图片字段接图片库、侧边栏卡片、页脚链接）。
+   3. 插件区：按 `package.json` 里已安装的插件列出各自的配置。
+   4. 页面数据：`source/_data` 里友链、相册、装备等的列表编辑。
 
 ## 10. 已确认的决定
 
@@ -300,6 +306,9 @@ app/
    - **图片卡片与文章开头（Linux WebKitGTK，博客副本）**：博客全部文章里的 39 处图片（19 个 `{% image %}`、17 个 Markdown、3 个行内）读出再写回逐字节一致；`MacBookPro.md` 里点图片卡片改宽度 700、切到 Markdown，文件分别写成 `width=700px` 和 `![说明](地址 =700x)`，预览随之刷新；标签用回车和逗号各加一个、候选列表出现；日历选日、方向键调小时，日期按“年-月-日 时:分:秒”写回，Esc 关闭。测试中发现：由 mousedown 打开的弹出框会被同一次按下当成“点了外面”立刻关掉（React 在这次事件冒泡到 window 之前就挂上了监听），已在 `useDismiss` 里忽略弹出前开始的按下。**输入法组字时的回车只能在 Mac 上用中文输入法确认**（Xvfb 里没有输入法）。
    - **多套存储配置（Linux，moto 模拟 S3）**：集成测试里先用一套配置上传，再新建第二套（同一个桶、不同路径和公开地址）并切换，新图传到第二套，删除旧图时按地址找回第一套、在第一套的存储里删除成功。界面里：旧格式的 `settings.json` 打开后显示为一套配置；新建第二套时填完表单直接“测试连接”通过（未保存）；保存后 `settings.json` 只剩 `profiles` 和 `active`；切换后配置条和编辑器都跟着变，旧图详情仍显示属于第一套；图库设置对话框正常。
 
+7. （M5）`hexo server` 运行中改 `_config.yml` / `_config.anzhiyu.yml` 是否生效：预计要重启服务器才行；若属实，配置保存后提示（或自动）重启预览。
+8. （M5）Hexo 7 合并 `_config.anzhiyu.yml` 与主题默认时的规则：对象逐层合并、数组整体替换（预计），决定“与默认不同”怎么标、删掉一个键会不会回落到默认值。
+
 ## 12. 待用户确认（对应里程碑开工前提问）
 
 | 编号 | 问题 | 建议默认 | 何时需要 |
@@ -309,9 +318,87 @@ app/
 | Q3 | 是否需要自动更新与 GitHub Release 发布流程 | **已定（2026-11-17）**：要，欢迎页检查更新，Tauri updater + GitHub Release，见第 13 节 | — |
 | Q4 | 是否把应用代码推到 GitHub（私有仓库） | **部分已定**：更新要求 Release 可匿名下载，所以仓库须公开；建仓、首次推送、配置 Secrets 仍由用户确认后再做 | 发布第一个版本前 |
 
+
+M5 开工前确认：
+
+| 编号 | 问题 | 建议默认 | 何时需要 |
+| --- | --- | --- | --- |
+| Q5 | `_config.anzhiyu.yml` 保持整份复制，还是精简成只写改过的值 | 保持整份复制，不改写整个文件；“与默认不同”由界面对比后标出（14.4 节） | M5.1 开工前 |
+| Q6 | 页面数据（友链、相册等）放在配置页里，还是单独一页 | 配置页里单独一组，以后内容多了再拆成独立页 | M5.4 开工前 |
+| Q7 | `_config.yml` 里 hexo-admin 的 `password_hash`、`secret` 已在 git 里 | 面板不显示、不编辑这两项；是否移出仓库、是否换密码由用户决定（博客仓库公开时哈希可被看到） | M5.1 开工前 |
+| Q8 | 不再使用的 `_config.butterfly.yml`、空的 `_admin-config.yml`、依赖里的 hexo-admin 与 hexo-theme-landscape | 面板不展示、不动；是否清理由用户决定 | 随时 |
+
 ## 13. 更新与发布
 
 - 照 Mihomo-Monitor：`tauri-plugin-updater`，更新地址 `https://github.com/EverettRain/Hexo-Studio/releases/latest/download/latest.json`（仓库名待建仓时确认），更新包用 Tauri 的 minisign 密钥签名。公钥写在 `tauri.conf.json`；私钥只放本机 `signing/`（不进 git）和 GitHub Actions Secret `TAURI_SIGNING_PRIVATE_KEY`。
 - 私有仓库的 Release 不能匿名下载，应用拿不到 `latest.json`，所以仓库须公开（Q4）。
 - 发布：推送 `v*` 标签触发 GitHub Actions，在 macOS（Apple Silicon）上 `tauri build`，产出 `.dmg`、`.app.tar.gz` 与签名、`latest.json`，上传到 Release。不做 Apple 公证（个人自用；首次打开需右键“打开”），更新包由应用自己下载，不带隔离属性，不受影响。
 - 欢迎页启动时检查一次；有新版本显示版本号与“安装并重启”。
+
+## 14. 配置管理（M5）
+
+分析时间 2026-11-21，博客为 EverettBlog `0a7a9c1`，主题 anzhiyu 1.6.14。
+
+### 14.1 配置从哪里来
+
+| 文件 | 行数 | 内容 | 面板怎么对待 |
+| --- | --- | --- | --- |
+| `_config.yml` | 257 | Hexo 核心设置，以及 6 个插件的配置 | 拆成“站点”与“插件”两块 |
+| `_config.anzhiyu.yml` | 1412 | 主题配置；Hexo 7 把它合并到主题默认值上，以它为准 | 主要编辑对象，主题配置只写这里 |
+| `themes/anzhiyu/_config.yml` | 1340 | 主题默认值（主题随博客一起提交，用户也改过它） | 只读，用作对照与字段说明 |
+| `themes/anzhiyu/scripts/events/merge_config.js` | — | 主题在代码里又兜底一层默认值 | 只在缺字段时参考 |
+| `source/_data/*` | 7 个文件 | 关于、相册、创造力、装备、友链、打赏、追番 | 页面内容，不是配置，单独一组（14.3 节） |
+
+不展示：`_config.butterfly.yml`（换主题前留下的 1154 行，主题已是 anzhiyu）、空的 `_admin-config.yml`、Hexo 生成且被 git 忽略的 `_multiconfig.yml`。
+
+### 14.2 主题配置的现状
+
+- 132 个顶层分区：有开关且开着的 42 个、关着的 46 个、没有开关（纯设置）的 44 个。
+- 与引入时的 anzhiyu 1.6.14 相比，真正改过的只有 37 个分区里的 83 个值；1400 行里大部分是原样复制的默认值。
+- 主题代码也被改过：`music_page`（自建音乐页）是新加的配置项，`ptool.share_llm`（分享栏“复制全文给 LLM”）是改出来的。按上游字段表做的控件会漏掉这类自定义字段，所以没有专门控件的字段一律能在通用编辑器里改（14.5 节）。
+- 文件里 478 行注释，多是中英双语的字段说明，解析出来作为字段提示。
+- 主题自己按注释分了 20 个大段（Code Blocks、Image、Post、Comments、Footer、Beautify/Effect、aside 等），粒度不均，面板按用户要做的事重新分组（14.3 节）。
+
+### 14.3 拆分
+
+**站点**（`_config.yml` 核心部分）：标题、作者、语言、时区、url、permalink、分页、目录、部署。`permalink`、`url`、`timezone` 影响 Studio 自己算出的文章地址和预览，改动时单独提醒。
+
+**主题**（`_config.anzhiyu.yml`），按任务分组：
+
+| 分组 | 包含的分区 | 控件 |
+| --- | --- | --- |
+| 首页与外观 | home_top、subtitle、index_img、default_top_img、cover、theme_color、font、display_mode、article_double_row | 图片字段接图片库 |
+| 导航 | menu、nav、social、rightClickMenu、centerConsole | 树形编辑；菜单项的 `路径 \|\| 图标` 拆成两个输入框 |
+| 侧边栏 | aside 的各张卡片、author_status、busuanzi、runtimeshow、newest_comments | 卡片开关 + 排序 |
+| 文章页 | post_meta、toc、post_copyright、related_post、noticeOutdate、wordcount、ptool、reward、代码块相关 | 普通表单 |
+| 评论 | comments.use + 选中服务（现为 twikoo）的配置 | 先选服务再只显示它的配置，其余服务折叠 |
+| 搜索与公式 | algolia、docsearch、本地搜索（三选一）、mathjax、katex、mermaid | 同上 |
+| 页脚 | footer（145 行，最大的一段） | 链接分组用列表编辑 |
+| 音乐 | nav_music、music_page、aplayerInject | 歌单列表 |
+| 特效 | canvas_*、fireworks、click_heart、preloader、peoplecanvas 等 | 一排开关 |
+| 统计、验证、广告 | 5 个统计服务、site_verification、google_adsense | ID 输入框 |
+| 高级 | CDN（86 行）、pjax、lazyload、pwa、icons、inject | 通用编辑器；`inject` 用代码编辑框 |
+
+**插件**（`_config.yml` 里各插件的段）：`markdown`（markdown-it 及其插件）、`aplayer`、`bangumi`、`envelope_comment`、`footer_beautify`、`admin`。每段对应 `package.json` 里的一个包，按已安装的插件列出；没装的不显示。
+
+**页面数据**（`source/_data`）：友链、相册、装备等是一条条记录，用列表 / 卡片编辑，不放进配置表单（Q6）。
+
+### 14.4 写入规则
+
+- 主题配置只写 `_config.anzhiyu.yml`，不碰主题目录。
+- 与文章 front-matter 相同：用 `yaml` 的 Document API 只替换改动键在源文本里的区间，注释、键的顺序、引号与日期写法都保留；带内容指纹，磁盘上被外部改过时不覆盖。
+- 默认保持整份复制的写法，不自动精简成“只写改过的值”（那会改写整个文件，diff 无法审）；“与主题默认不同”由界面对比 `themes/anzhiyu/_config.yml` 后标出（Q5）。
+- 字段值里的 HTML（`inject.head` / `bottom`、`_config.yml` 的 `description`）按原文编辑，不转义、不格式化。
+
+### 14.5 控件从哪来
+
+两层，与“按 EverettBlog 实现、不做多主题抽象”的决定一致：
+
+1. **通用 YAML 树编辑器**：按值的类型给控件（布尔 → 开关，数字、字符串、列表、对象逐层展开），保证所有字段都能改，自定义字段也不例外；字段提示取自上方的注释。
+2. **常用分组的专用控件**：只为 14.3 节表里列出的分组手写，字段表写死在代码里，对应 anzhiyu 1.6.14；表里没有的字段落回第 1 层。
+
+### 14.6 生效与安全
+
+- 配置改动要重启预览服务器才生效（待实测，第 11 节第 7 项）；保存后提示“重启预览”，部署前不需要额外处理（部署本来就重新生成）。
+- `admin.password_hash`、`admin.secret` 不显示、不编辑（Q7）。
+- 现有的图片接管与“使用情况”已经扫描 `_config*.yml` 与主题目录下的 `_config*.yml`，配置里的图片字段换图后，图片库的使用情况保持准确。
