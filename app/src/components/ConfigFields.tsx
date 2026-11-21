@@ -219,7 +219,7 @@ export function Field({ path, value, def, ctx, inDefaultsOnly = false }: { path:
 
 function Row({ label, children, action }: { label: React.ReactNode; children: React.ReactNode; action?: React.ReactNode }) {
   return (
-    <div className="grid grid-cols-[minmax(140px,220px)_minmax(0,1fr)_28px] items-start gap-3 py-1.5">
+    <div className="grid grid-cols-[minmax(150px,230px)_minmax(0,1fr)_28px] items-start gap-4 py-2">
       {label}
       <div className="min-w-0 py-[1px]">{children}</div>
       <div>{action}</div>

@@ -38,6 +38,15 @@ const SAVE_DELAY = 400;
 const HIDDEN = new Set([pathKey(["admin", "password_hash"]), pathKey(["admin", "secret"])]);
 const ADDRESS_KEYS = new Set(["url", "root", "permalink", "permalink_defaults", "pretty_urls", "timezone"].map((k) => pathKey([k])));
 
+/** A value in a few words, for a list row whose section has no comment to show. */
+function brief(v: unknown): string {
+  if (typeof v === "boolean") return v ? "开" : "关";
+  if (Array.isArray(v)) return `${v.length} 项`;
+  if (v !== null && typeof v === "object") return `${Object.keys(v).length} 项设置`;
+  if (v === null || v === undefined || v === "") return "未设置";
+  return String(v);
+}
+
 /** Every key name, comment hint and text value under a section, lower-cased, for search. */
 function searchText(key: string, value: unknown, hints: Map<string, string>): string {
   const parts: string[] = [key];
@@ -286,17 +295,31 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
 
   return (
     <div className="flex h-full min-h-0 flex-col px-5 pb-5">
-      <div className="flex shrink-0 items-center gap-2 pb-3 pt-1">
-        <Segmented
-          value={view}
-          onChange={setView}
-          options={[
-            { value: "site", label: "站点", title: "_config.yml 里 Hexo 自己的设置" },
-            { value: "plugins", label: "插件", title: "_config.yml 里各插件的设置" },
-            ...(files.theme ? [{ value: "theme" as const, label: `主题 · ${themeName}`, title: `${files.theme.path}（Hexo 把它合并到主题默认值上）` }] : []),
-            { value: "data", label: "页面数据", title: "source/_data 里友链、相册、装备等页面用的数据" },
-          ]}
-        />
+      <div className="flex shrink-0 items-center gap-3 pb-4 pt-1">
+        <div role="tablist" className="flex items-center gap-1">
+          {(
+            [
+              { value: "site", label: "站点", title: "_config.yml 里 Hexo 自己的设置" },
+              { value: "plugins", label: "插件", title: "_config.yml 里各插件的设置" },
+              ...(files.theme ? [{ value: "theme" as const, label: `主题 · ${themeName}`, title: `${files.theme.path}（Hexo 把它合并到主题默认值上）` }] : []),
+              { value: "data", label: "页面数据", title: "source/_data 里友链、相册、装备等页面用的数据" },
+            ] as { value: View; label: string; title: string }[]
+          ).map((t) => (
+            <button
+              key={t.value}
+              role="tab"
+              aria-selected={view === t.value}
+              title={t.title}
+              onClick={() => setView(t.value)}
+              className={cn(
+                "h-8 rounded-lg px-3.5 text-[13px] active:!scale-100",
+                view === t.value ? "bg-fg font-semibold text-card shadow-[0_1px_2px_rgba(0,0,0,0.12)]" : "text-fg-2 hover:bg-pill hover:text-fg",
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
         <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-muted" title={shownPath}>
           {shownPath}
         </span>
@@ -338,8 +361,8 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
           <div className="text-muted">请在编辑器里修好后回到这里。</div>
         </div>
       ) : (
-        <div className="flex min-h-0 flex-1 gap-4">
-          <aside className="flex w-[230px] shrink-0 flex-col gap-2">
+        <div className="flex min-h-0 flex-1 gap-5">
+          <aside className="flex w-[268px] shrink-0 flex-col gap-2.5">
             {view === "theme" && (
               <Segmented
                 value={order}
@@ -353,29 +376,44 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
             )}
             <div className="relative shrink-0">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
-              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索键名、说明、值" className="field h-8 pl-8 text-[12.5px]" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索键名、说明、值" className="field h-9 rounded-lg pl-8 text-[13px]" />
             </div>
-            <nav className="min-h-0 flex-1 overflow-y-auto pb-2">
+            <nav className="-mr-1 min-h-0 flex-1 overflow-y-auto pb-3 pr-1">
               {shownGroups.length === 0 && <div className="px-2 py-3 text-[12.5px] text-muted">{q ? "没有匹配的设置" : "这里没有设置"}</div>}
               {shownGroups.map((g, gi) => (
-                <div key={gi} className="pb-2">
-                  {g.title && <div className="group-label truncate pt-1" title={g.title}>{g.title}</div>}
+                <div key={gi} className="space-y-0.5 pb-4">
+                  {g.title && (
+                    <div className="group-label truncate px-2.5 pb-1.5 pt-1" title={g.title}>
+                      {g.title}
+                    </div>
+                  )}
                   {g.keys.map((k) => {
                     const p = view === "plugins" ? pluginView(k)?.plugin : undefined;
                     const d = view === "data" ? readConfig(files[`data:${k}`]?.text ?? "").data : undefined;
-                    const hint = view === "data" ? (Array.isArray(d) ? `${d.length} 组` : "") : k === SEARCH_PANEL ? "Algolia、本地搜索、DocSearch 三选一" : p ? (p.version ? `${p.version} · ${p.description ?? ""}` : "没有安装") : hints.get(pathKey([k]));
+                    const hint =
+                      view === "data"
+                        ? Array.isArray(d) ? `${d.length} 组` : brief(d)
+                        : k === SEARCH_PANEL
+                          ? "Algolia、本地搜索、DocSearch 三选一"
+                          : p
+                            ? p.version ? `${p.version} · ${p.description ?? ""}` : "没有安装"
+                            : hints.get(pathKey([k])) || brief(data[k] ?? themeDefaults?.[k]);
+                    const active = k === section;
+                    // Every row has two lines (name, then its note or a word on its value), so the list is even.
                     return (
                       <button
                         key={k}
                         onClick={() => setSelected((s) => ({ ...s, [view]: k }))}
+                        aria-current={active ? "true" : undefined}
                         className={cn(
-                          "flex w-full items-center gap-1.5 rounded-[7px] px-2 py-1 text-left active:!scale-100",
-                          k === section ? "bg-card shadow-edge dark:bg-white/[.07]" : "hover:bg-pill",
+                          "relative flex h-[46px] w-full items-center gap-2 rounded-lg pl-3 pr-2.5 text-left active:!scale-100",
+                          active ? "bg-brand-soft" : "hover:bg-pill",
                         )}
                       >
+                        {active && <span aria-hidden className="absolute inset-y-2.5 left-0 w-[3px] rounded-full bg-brand" />}
                         <span className="min-w-0 flex-1">
-                          <span className={cn("block truncate text-[12.5px]", k !== SEARCH_PANEL && "font-mono")}>{sectionTitle(k)}</span>
-                          {hint && <span className="block truncate text-[11px] text-muted">{hint}</span>}
+                          <span className={cn("block truncate text-[13px] leading-5", k !== SEARCH_PANEL && "font-mono", active ? "font-semibold text-brand" : "text-fg")}>{sectionTitle(k)}</span>
+                          <span className={cn("block truncate text-[11.5px] leading-4", active ? "text-brand/75" : "text-muted")}>{hint}</span>
                         </span>
                         {changedFromDefault(k) && <span title="与主题默认值不同" className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />}
                       </button>
@@ -386,12 +424,12 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
             </nav>
           </aside>
 
-          <section className="list-card min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-4">
+          <section className="list-card min-h-0 min-w-0 flex-1 overflow-y-auto px-7 py-6">
             {section ? (
               <div key={`${view}:${section}`} className="view-in">
-                <div className="mb-2 border-b-[0.5px] border-line-2 pb-3">
+                <div className="mb-4 border-b-[0.5px] border-line-2 pb-4">
                   <div className="flex items-center gap-2">
-                    <h2 className={cn("selectable text-[15px] font-semibold", section !== SEARCH_PANEL && "font-mono")}>{sectionTitle(section)}</h2>
+                    <h2 className={cn("selectable text-[17px] font-semibold", section !== SEARCH_PANEL && "font-mono")}>{sectionTitle(section)}</h2>
                     {changedFromDefault(section) && <span className="rounded bg-brand-soft px-1.5 text-[11px] text-brand">已改动</span>}
                     {view === "theme" && section !== SEARCH_PANEL && !(section in data) && <span className="rounded bg-pill px-1.5 text-[11px] text-muted">仅在主题默认里，修改会写进 {files.theme?.path}</span>}
                   </div>
