@@ -2,6 +2,7 @@ import { open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialo
 import { Copy, Download, FileUp, FolderSearch, ImagePlus, Inbox, Loader2, Plus, Search, ShieldCheck, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { AdoptionDialog } from "@/components/AdoptionDialog";
+import { useImport } from "@/components/ImportPanel";
 import { LibrarySettingsDialog, ProfileDialog, ProfileSwitcher } from "@/components/StorageProfiles";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
@@ -14,7 +15,6 @@ import { cn } from "@/lib/utils";
 
 type Filter = "all" | "unused" | "problem";
 
-const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "heic", "heif", "avif", "svg"];
 
 const hasProblem = (i: LibraryImage) => i.ok === false || i.check?.ok === false;
 
@@ -206,13 +206,12 @@ export function ImagesPage({ onOpenPost }: ImagesPageProps) {
   const [filter, setFilter] = useState<Filter>("all");
   const [selected, setSelected] = useState<string | null>(null);
   const [checking, setChecking] = useState<[number, number] | null>(null);
-  const [uploading, setUploading] = useState(0);
+  const importer = useImport();
   const [adopting, setAdopting] = useState(false);
   const [storage, setStorage] = useState<StorageSettings | null>(null);
   /** The profile dialog: `null` profile creates one. */
   const [editing, setEditing] = useState<{ profile: Profile | null } | null>(null);
   const [libSettings, setLibSettings] = useState(false);
-  const activeProfile = storage?.profiles.find((p) => p.id === storage.active) ?? null;
 
   const load = useCallback(() => {
     api.imageLibrary().then(setLibrary, (e) => toast(errorText(e), "error"));
@@ -225,6 +224,10 @@ export function ImagesPage({ onOpenPost }: ImagesPageProps) {
     loadStorage();
     load();
   }, [active, load, loadStorage]);
+  // An import (from this page or any other) added images.
+  useEffect(() => {
+    if (importer.libraryVersion) load();
+  }, [importer.libraryVersion, load]);
 
   /** After a profile changed: the library's counts and owners follow the profiles. */
   const storageChanged = (s: StorageSettings) => {
@@ -250,25 +253,6 @@ export function ImagesPage({ onOpenPost }: ImagesPageProps) {
     [images, filter, query],
   );
   const current = images.find((i) => i.id === selected) ?? null;
-
-  const upload = async () => {
-    const picked = await openDialog({ title: "添加图片到图库", multiple: true, filters: [{ name: "图片", extensions: IMAGE_EXTENSIONS }] });
-    const paths = picked ? (Array.isArray(picked) ? picked : [picked]) : [];
-    if (!paths.length) return;
-    setUploading(paths.length);
-    for (const p of paths) {
-      try {
-        const r = await api.uploadImageFile(null, p, activeProfile?.upload.format ?? "webp");
-        toast(r.existed ? `图库里已有这张图：${r.image.name}` : `已入库 ${r.image.name}`);
-        setSelected(r.image.id);
-      } catch (e) {
-        toast(`${p.split("/").pop()} 入库失败：${errorText(e)}`, "error");
-      } finally {
-        setUploading((n) => n - 1);
-      }
-    }
-    load();
-  };
 
   const check = async () => {
     setChecking([0, images.length]);
@@ -384,9 +368,9 @@ export function ImagesPage({ onOpenPost }: ImagesPageProps) {
           <Button variant="ghost" size="icon" title="导出图片核对清单（CSV）" onClick={() => void exportChecklist()}>
             <Download />
           </Button>
-          <Button onClick={() => void upload()} disabled={uploading > 0}>
+          <Button onClick={() => void importer.choose()} title="也可以把图片拖进窗口，或直接粘贴截图">
             <ImagePlus />
-            {uploading ? `入库中 ${uploading}` : "添加图片"}
+            添加图片
           </Button>
         </div>
         <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-6">

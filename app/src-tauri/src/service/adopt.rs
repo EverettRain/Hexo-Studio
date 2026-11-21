@@ -160,6 +160,7 @@ pub async fn run(
                 bytes,
                 file_name: Some(file_name),
                 format: Format::Webp,
+                encoding: None,
                 name: Some(name),
                 description: default_description(c),
                 today: today.to_string(),

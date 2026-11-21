@@ -46,6 +46,10 @@ csv = "1"
 webp = "0.3"
 # Quits through the normal exit path on SIGTERM / SIGINT / SIGHUP, so the preview server stops.
 signal-hook = "0.3"
+# The import panel's preview of a converted image travels to the page as base64.
+base64 = "0.22"
+# Copies an uploaded image's markup once the upload ends (the web clipboard API needs a fresh click).
+tauri-plugin-clipboard-manager = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 keyring = { version = "3", features = ["apple-native"] }

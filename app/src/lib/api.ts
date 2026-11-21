@@ -399,15 +399,61 @@ export const api = {
   runAdoption: (checklist: string | null) => invoke<AdoptionReport>("run_adoption", { checklist }),
   importChecklist: (path: string) => invoke<ImportReport>("import_checklist", { path }),
   exportChecklist: (path: string) => invoke<void>("export_checklist", { path }),
-  /** `postId` null: added on the image page, not for a post. */
-  uploadImageFile: (postId: string | null, path: string, format: ImageFormat) => invoke<Ingested>("upload_image_file", { postId, path, format }),
-  /** Pasted bytes go as the raw request body; text travels in headers, percent-encoded. */
-  /** `name` empty: a screenshot, named by the time it was pasted. */
-  uploadImageBytes: async (postId: string | null, file: Blob, name: string, format: ImageFormat) =>
-    invoke<Ingested>("upload_image_bytes", new Uint8Array(await file.arrayBuffer()), {
-      headers: { "x-post": encodeURIComponent(postId ?? ""), "x-name": encodeURIComponent(name), "x-format": format },
+  /** An image file dropped on the window or chosen in a dialog, as bytes. */
+  readImageFile: async (path: string) => new Blob([await invoke<ArrayBuffer>("read_image_file", { path })]),
+  /** How an image would be uploaded with these settings, worked out without uploading it. */
+  prepareImage: async (image: Blob, fileName: string | null, conversion: Conversion) =>
+    invoke<PreparedImage>("prepare_image", new Uint8Array(await image.arrayBuffer()), { headers: imageHeaders({ "x-file": fileName ?? "", ...conversionHeaders(conversion) }) }),
+  /** Takes an image into the library through the active profile. */
+  uploadImage: async (image: Blob, meta: UploadMeta, conversion: Conversion) =>
+    invoke<Ingested>("upload_image_bytes", new Uint8Array(await image.arrayBuffer()), {
+      headers: imageHeaders({ "x-file": meta.fileName ?? "", "x-name": meta.name, "x-description": meta.description, "x-post": meta.postId ?? "", ...conversionHeaders(conversion) }),
     }),
+  /** Makes a WebP quality and longest edge the active profile's defaults. */
+  setUploadEncoding: (quality: number, maxEdge: number) => invoke<StorageSettings>("set_upload_encoding", { quality, maxEdge }),
 };
+
+/** How an image is converted on the way in. */
+export interface Conversion {
+  format: ImageFormat;
+  quality: number;
+  maxEdge: number;
+}
+
+export interface UploadMeta {
+  /** The file's own name; null for a screenshot (named by the time). */
+  fileName: string | null;
+  /** The library's name for it; empty takes the file's. */
+  name: string;
+  /** Where it is used; empty takes "<post> 内图" for a post. */
+  description: string;
+  postId: string | null;
+}
+
+export interface Measured {
+  bytes: number;
+  width: number;
+  height: number;
+}
+
+export interface PreparedImage {
+  id: string;
+  /** The library holds this picture already. */
+  existing: ImageRecord | null;
+  original: Measured;
+  /** What would be uploaded: WebP, or the original (asked for, or a GIF / SVG). */
+  format: ImageFormat;
+  output: Measured;
+  /** The converted image, base64 WebP; null when the original is kept. */
+  preview: string | null;
+}
+
+const conversionHeaders = (c: Conversion) => ({ "x-format": c.format, "x-quality": String(c.quality), "x-max-edge": String(c.maxEdge) });
+
+/** Text for raw-body commands travels in headers, percent-encoded. */
+function imageHeaders(h: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(Object.entries(h).map(([k, v]) => [k, encodeURIComponent(v)]));
+}
 
 export function onEvent<T>(name: string, handler: (payload: T) => void): () => void {
   const un: Promise<UnlistenFn> = listen<T>(name, (e) => handler(e.payload));

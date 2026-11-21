@@ -1,5 +1,3 @@
-import { getCurrentWebview } from "@tauri-apps/api/webview";
-import { open as openDialog } from "@tauri-apps/plugin-dialog";
 import { AlertTriangle, ChevronLeft, Code2, ExternalLink, FolderSearch, PanelRightClose, PanelRightOpen, Search, Send } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { EditorToolbar } from "@/components/EditorToolbar";
@@ -11,9 +9,11 @@ import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
 import { ImagePicker, type PickPurpose } from "@/components/ImagePicker";
-import { api, errorText, type BlogConfigView, type ImageFormat, type InsertStyle, type Ingested, type Library, type PageProbe, type PostFile, type PostSummary, type PreviewState } from "@/lib/api";
+import { useImport } from "@/components/ImportPanel";
+import { api, errorText, type BlogConfigView, type InsertStyle, type Library, type PageProbe, type PostFile, type PostSummary, type PreviewState } from "@/lib/api";
 import { applyEdits } from "@/lib/frontmatter";
 import { newImage, renderImage, type FoundImage, type ImageMarkup } from "@/lib/imageMarkup";
+import { ownFileName } from "@/lib/imageImport";
 import { describeImage, indexImages } from "@/lib/images";
 import { wordCount, type FormatState } from "@/lib/markdownCommands";
 import { usePageActive } from "@/lib/pageActive";
@@ -34,12 +34,6 @@ interface EditorPageProps {
 
 type SaveState = "saved" | "dirty" | "saving" | "conflict" | "error";
 
-const IMAGE_EXTENSIONS = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "heic", "heif", "avif", "svg"];
-const isImagePath = (p: string) => IMAGE_EXTENSIONS.includes(p.split(".").pop()?.toLowerCase() ?? "");
-const baseName = (p: string) => p.split("/").pop() ?? p;
-const kb = (n: number) => (n >= 1048576 ? `${(n / 1048576).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`);
-/** Pasted screenshots arrive as `image.png`: those are named by time instead. */
-const pastedName = (f: File) => (/^image\.\w+$/i.test(f.name) ? "" : f.name);
 
 /** Typing stops this long before the post is saved (and the preview refreshed). */
 const AUTOSAVE_MS = 1000;
@@ -73,10 +67,7 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
   const [publishing, setPublishing] = useState<"ask" | "busy" | null>(null);
   const editor = useRef<EditorHandle>(null);
   const active = usePageActive();
-  const [format, setFormat] = useState<ImageFormat>("webp");
-  const [storageReady, setStorageReady] = useState(false);
-  const [uploading, setUploading] = useState(0);
-  const [dropping, setDropping] = useState(false);
+  const importer = useImport();
   const [picking, setPicking] = useState<PickPurpose | null>(null);
   const [fmt, setFmt] = useState<FormatState | null>(null);
   const words = useMemo(() => wordCount(body), [body]);
@@ -98,76 +89,25 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
     api.storageProfiles().then(
       (s) => {
         const p = s.profiles.find((x) => x.id === s.active);
-        setFormat(p?.upload.format ?? "webp");
         setInsertStyle(p?.upload.style ?? "image");
-        setStorageReady(!!p?.accessKeyId);
       },
       () => {},
     );
     loadLibrary();
   }, [active, loadLibrary]);
 
-  /**
-   * Each image gets a placeholder at the cursor at once, replaced by its link when the upload
-   * finishes (or removed if it fails), so typing can go on meanwhile.
-   */
-  const uploadImages = useCallback(
-    async (items: { label: string; run: () => Promise<Ingested> }[]) => {
-      if (!items.length) return;
-      if (!storageReady) {
-        toast("还没有可用的图片存储配置：在“图片”页新建一套，并填好 AccessKey", "error");
-        return;
-      }
-      const tagged = items.map((it, i) => ({ ...it, mark: `![上传中：${it.label}…](#${Date.now().toString(36)}${i})` }));
-      editor.current?.insert(tagged.map((t) => t.mark).join("\n"));
-      setUploading((n) => n + tagged.length);
-      await Promise.all(
-        tagged.map(async (t) => {
-          try {
-            const r = await t.run();
-            editor.current?.replace(t.mark, newImage(r.image.url, insertStyle));
-            toast(
-              r.existed
-                ? `图库里已有这张图（${r.image.name}），直接引用`
-                : `已入库 ${t.label}（${r.image.format === "webp" ? `WebP ${kb(r.image.bytes)}，原图 ${kb(r.originalBytes)}` : kb(r.image.bytes)}）`,
-            );
-          } catch (e) {
-            editor.current?.replace(t.mark, "");
-            toast(`${t.label} 上传失败：${errorText(e)}`, "error");
-          } finally {
-            setUploading((n) => n - 1);
-          }
-        }),
-      );
-      loadLibrary();
-    },
-    [storageReady, toast, insertStyle, loadLibrary],
-  );
-
-  const uploadPaths = useCallback(
-    (paths: string[]) => uploadImages(paths.filter(isImagePath).map((p) => ({ label: baseName(p), run: () => api.uploadImageFile(id, p, format) }))),
-    [uploadImages, id, format],
-  );
-
-  const chooseImages = async () => {
-    const picked = await openDialog({ title: "插入图片", multiple: true, filters: [{ name: "图片", extensions: IMAGE_EXTENSIONS }] });
-    if (picked) void uploadPaths(Array.isArray(picked) ? picked : [picked]);
-  };
-
-  // Files dropped on the window arrive as paths through Tauri, not as DOM drop events.
+  // While shown, images dropped or pasted anywhere in the window are offered for this post, and
+  // inserted at the cursor once uploaded.
   useEffect(() => {
     if (!active) return;
-    const un = getCurrentWebview().onDragDropEvent((e) => {
-      const p = e.payload;
-      if (p.type === "enter") setDropping(p.paths.some(isImagePath));
-      else if (p.type === "leave") setDropping(false);
-      else if (p.type === "drop") {
-        setDropping(false);
-        void uploadPaths(p.paths);
-      }
-    });
-    return () => void un.then((f) => f());
-  }, [active, uploadPaths]);
+    importer.setInsertTarget({ postId: id, insert: (images) => editor.current?.insert(images.map((img) => newImage(img.url, insertStyle)).join("\n")) });
+    return () => importer.setInsertTarget(null);
+  }, [active, id, insertStyle, importer]);
+  // The library changed (an import): names and thumbnails of the post's images come from it.
+  useEffect(() => {
+    if (importer.libraryVersion) loadLibrary();
+  }, [importer.libraryVersion, loadLibrary]);
+
   const split = useRef<HTMLDivElement>(null);
 
   // The latest text and what is on disk, for saves started by timers and shortcuts.
@@ -493,20 +433,12 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
       />
 
       <div ref={split} className="relative flex min-h-0 flex-1">
-        {dropping && (
-          <div className="pointer-events-none absolute inset-2 z-20 flex items-center justify-center rounded-xl border-2 border-dashed border-brand bg-brand-soft/80 text-[14px] font-medium text-brand">
-            松开以上传图片（{format === "webp" ? "转成 WebP" : "原图"}），插入到光标处
-          </div>
-        )}
         <div className="flex min-w-0 flex-1 flex-col">
           <EditorToolbar
             format={fmt}
             run={(cmd) => editor.current?.run(cmd)}
-            onUpload={() => void chooseImages()}
+            onUpload={() => void importer.choose()}
             onLibrary={() => setPicking("insert")}
-            imageFormat={format}
-            onImageFormat={setFormat}
-            uploading={uploading}
           />
           {/* The article header and the body scroll as one page. */}
           <div className="relative min-h-0 flex-1">
@@ -530,7 +462,7 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
                 onFormat={setFmt}
                 images={imageDisplay}
                 onImageOpen={(found, rect) => setStyling({ found, rect })}
-                onPasteImages={(files) => void uploadImages(files.map((f) => ({ label: f.name || "截图", run: () => api.uploadImageBytes(id, f, pastedName(f), format) })))}
+                onPasteImages={(files) => importer.open(files.map((f) => ({ blob: f, fileName: ownFileName(f.name) })))}
               />
             </div>
           </div>

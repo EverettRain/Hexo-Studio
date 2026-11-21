@@ -11,7 +11,6 @@ import {
   List,
   ListOrdered,
   ListTodo,
-  Loader2,
   SquareCode,
   Strikethrough,
   Table,
@@ -19,7 +18,6 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { ImageFormat } from "@/lib/api";
 import {
   codeBlock,
   gallery,
@@ -152,15 +150,13 @@ function MenuItem({ label, hint, checked, onClick }: { label: string; hint?: str
 interface EditorToolbarProps {
   format: FormatState | null;
   run: (cmd: MdCommand) => void;
+  /** Opens the import panel with files chosen in a dialog. */
   onUpload: () => void;
   onLibrary: () => void;
-  imageFormat: ImageFormat;
-  onImageFormat: (f: ImageFormat) => void;
-  uploading: number;
 }
 
 /** Formatting for the post body: each control edits the Markdown text, as typing it would. */
-export function EditorToolbar({ format, run, onUpload, onLibrary, imageFormat, onImageFormat, uploading }: EditorToolbarProps) {
+export function EditorToolbar({ format, run, onUpload, onLibrary }: EditorToolbarProps) {
   const heading = format?.heading ?? 0;
   return (
     <div className="flex shrink-0 flex-wrap items-center gap-y-1 border-b-[0.5px] border-line px-2 py-1">
@@ -209,23 +205,8 @@ export function EditorToolbar({ format, run, onUpload, onLibrary, imageFormat, o
         }
       </Menu>
       <Divider />
-      <Tool icon={ImagePlus} label="上传图片（也可以直接粘贴或拖进来）" onClick={onUpload} />
+      <Tool icon={ImagePlus} label="导入图片（也可以直接粘贴或拖进窗口）" onClick={onUpload} />
       <Tool icon={Images} label="从图库选图（本文或其他页面的）" onClick={onLibrary} />
-      <button
-        type="button"
-        title="上传格式，点击切换（默认值在图片页的存储配置里改）"
-        onMouseDown={keepFocus}
-        onClick={() => onImageFormat(imageFormat === "webp" ? "original" : "webp")}
-        className="ml-0.5 h-[22px] shrink-0 rounded-[5px] bg-pill px-1.5 text-[11px] font-medium text-fg-2 hover:bg-pill-hover hover:text-fg active:!scale-100"
-      >
-        {imageFormat === "webp" ? "WebP" : "原图"}
-      </button>
-      {uploading > 0 && (
-        <span className="ml-1.5 flex shrink-0 items-center gap-1 text-[11.5px] text-muted">
-          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-          上传中 {uploading}
-        </span>
-      )}
     </div>
   );
 }

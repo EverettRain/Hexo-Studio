@@ -43,6 +43,7 @@ fn incoming(bytes: Vec<u8>, name: Option<&str>, format: Format) -> images::Incom
         bytes,
         file_name: name.map(String::from),
         format,
+        encoding: None,
         name: None,
         description: "现代 C++ 的安全 内图".into(),
         today: "2025-11-24".into(),

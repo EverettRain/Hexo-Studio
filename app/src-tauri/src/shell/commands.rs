@@ -735,55 +735,101 @@ fn today_and_now(blog: &Blog) -> (String, jiff::civil::DateTime) {
     (now.date().to_string(), now)
 }
 
-/// Takes an image into the library. From a post (`post_id`), its default description names the
-/// post, and the caller inserts its address there.
-async fn ingest_for(
-    ws: &Workspace,
-    post_id: Option<&str>,
-    file_name: Option<String>,
-    bytes: Vec<u8>,
-    format: Format,
-) -> Result<images::Ingested, String> {
-    let blog = current_blog(ws)?;
-    let description = match post_id {
-        Some(id) => {
-            let title = blog.read_post(id).ok().and_then(|f| f.summary.title).unwrap_or_else(|| id.to_string());
-            format!("{title} 内图")
-        }
-        None => String::new(),
+/// A header of a raw-body image request (percent-encoded text); `None` when missing or empty.
+fn header(request: &tauri::ipc::Request<'_>, name: &str) -> Option<String> {
+    let raw = request.headers().get(name)?.to_str().ok()?;
+    let v = url::form_urlencoded::parse(format!("v={raw}").as_bytes()).next()?.1.into_owned();
+    (!v.is_empty()).then_some(v)
+}
+
+/// `x-format` (`webp` / `original`), `x-quality` and `x-max-edge`; the profile's where missing.
+fn conversion(request: &tauri::ipc::Request<'_>, upload: &UploadSettings) -> (Format, images::Encoding) {
+    let format = match header(request, "x-format").as_deref() {
+        Some("original") => Format::Original,
+        Some(_) => Format::Webp,
+        None => upload.format,
     };
+    let encoding = images::Encoding {
+        quality: header(request, "x-quality").and_then(|q| q.parse().ok()).unwrap_or(upload.quality),
+        max_edge: header(request, "x-max-edge").and_then(|m| m.parse().ok()).unwrap_or(upload.max_edge),
+    };
+    (format, encoding)
+}
+
+fn raw_body<'a>(request: &'a tauri::ipc::Request<'_>) -> Result<&'a Vec<u8>, String> {
+    match request.body() {
+        tauri::ipc::InvokeBody::Raw(bytes) => Ok(bytes),
+        _ => Err("没有收到图片数据。".into()),
+    }
+}
+
+const IMAGE_FILES: [&str; 12] = ["jpg", "jpeg", "png", "gif", "webp", "bmp", "tif", "tiff", "heic", "heif", "avif", "svg"];
+
+/// An image file dropped on the window or chosen in a dialog, as bytes for the import panel.
+#[tauri::command]
+pub async fn read_image_file(path: String) -> Result<tauri::ipc::Response, String> {
+    let ext = Path::new(&path).extension().map(|e| e.to_string_lossy().to_lowercase()).unwrap_or_default();
+    if !IMAGE_FILES.contains(&ext.as_str()) {
+        return Err(format!("不是图片文件：{path}"));
+    }
+    let bytes = blocking(move || std::fs::read(&path).map_err(|e| format!("无法读取 {path}：{e}"))).await?;
+    Ok(tauri::ipc::Response::new(bytes))
+}
+
+/// How an image would be uploaded, without uploading it: the raw body is the image; headers
+/// `x-file` (its file name), `x-format`, `x-quality`, `x-max-edge`.
+#[tauri::command]
+pub async fn prepare_image(ws: Ws<'_>, request: tauri::ipc::Request<'_>) -> Result<images::Prepared, String> {
+    let root = project_root(&ws)?;
+    let s = project::load_settings(&root)?;
+    let upload = s.active_profile().map(|p| p.upload.clone()).unwrap_or_default();
+    let (format, encoding) = conversion(&request, &upload);
+    images::prepare(&root, raw_body(&request)?.clone(), header(&request, "x-file").as_deref(), format, encoding).await
+}
+
+/// Takes an image into the library, sent as the raw request body. Headers (percent-encoded):
+/// `x-file` its file name (none for a screenshot, named by the time), `x-name` and
+/// `x-description` the record's, `x-post` the post it is for (its default description names
+/// it), and the conversion as `prepare_image` reads it.
+#[tauri::command]
+pub async fn upload_image_bytes(ws: Ws<'_>, request: tauri::ipc::Request<'_>) -> Result<images::Ingested, String> {
+    let blog = current_blog(&ws)?;
     let s = project::load_settings(&blog.root)?;
+    let upload = s.active_profile().map(|p| p.upload.clone()).unwrap_or_default();
+    let (format, encoding) = conversion(&request, &upload);
+    let description = header(&request, "x-description").unwrap_or_else(|| match header(&request, "x-post") {
+        Some(id) => format!("{} 内图", blog.read_post(&id).ok().and_then(|f| f.summary.title).unwrap_or(id)),
+        None => String::new(),
+    });
     let (today, now) = today_and_now(&blog);
-    let inc = images::Incoming { bytes, file_name, format, name: None, description, today, legacy_urls: Vec::new(), now };
+    let inc = images::Incoming {
+        bytes: raw_body(&request)?.clone(),
+        file_name: header(&request, "x-file"),
+        format,
+        encoding: Some(encoding),
+        name: header(&request, "x-name"),
+        description,
+        today,
+        legacy_urls: Vec::new(),
+        now,
+    };
     images::ingest(&blog.root, &s, &settings::load().backup_dir(), inc).await
 }
 
-/// Takes a file from disk into the library (dropped on the editor, chosen in a dialog, or
-/// added on the image page).
+/// Makes a WebP quality and longest edge the active profile's defaults (from the import panel).
 #[tauri::command]
-pub async fn upload_image_file(ws: Ws<'_>, post_id: Option<String>, path: String, format: Format) -> Result<images::Ingested, String> {
-    let file = PathBuf::from(&path);
-    let name = file.file_name().map(|n| n.to_string_lossy().into_owned());
-    let bytes = blocking(move || std::fs::read(&file).map_err(|e| format!("无法读取 {path}：{e}"))).await?;
-    ingest_for(&ws, post_id.as_deref(), name, bytes, format).await
-}
-
-/// Takes pasted image bytes into the library, sent as the raw request body; the post, an
-/// optional file name and the format come in headers (`x-post`, `x-name`, percent-encoded;
-/// `x-format`).
-#[tauri::command]
-pub async fn upload_image_bytes(ws: Ws<'_>, request: tauri::ipc::Request<'_>) -> Result<images::Ingested, String> {
-    let tauri::ipc::InvokeBody::Raw(bytes) = request.body() else { return Err("没有收到图片数据。".into()) };
-    let header = |name: &str| -> Option<String> {
-        let raw = request.headers().get(name)?.to_str().ok()?;
-        Some(url::form_urlencoded::parse(format!("v={raw}").as_bytes()).next()?.1.into_owned())
-    };
-    let format = match header("x-format").as_deref() {
-        Some("original") => Format::Original,
-        _ => Format::Webp,
-    };
-    let post = header("x-post").filter(|p| !p.is_empty());
-    ingest_for(&ws, post.as_deref(), header("x-name").filter(|n| !n.is_empty()), bytes.clone(), format).await
+pub async fn set_upload_encoding(ws: Ws<'_>, quality: u8, max_edge: u32) -> Result<StorageView, String> {
+    let root = project_root(&ws)?;
+    blocking(move || {
+        let mut s = project::load_settings(&root)?;
+        let id = s.active_profile().map(|p| p.id.clone()).ok_or("还没有图片存储配置：在图片页新建一套。")?;
+        let p = s.profiles.iter_mut().find(|p| p.id == id).expect("the active profile is one of them");
+        p.upload.quality = quality.clamp(1, 100);
+        p.upload.max_edge = max_edge;
+        project::save_settings(&root, &s)?;
+        storage_view(&root)
+    })
+    .await
 }
 
 #[derive(Serialize)]

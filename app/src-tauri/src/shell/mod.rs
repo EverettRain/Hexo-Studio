@@ -57,6 +57,7 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| window::show_main(app)))
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .invoke_handler(tauri::generate_handler![
             commands::app_info,
@@ -104,7 +105,9 @@ pub fn run() {
             commands::activate_profile,
             commands::save_library_settings,
             commands::check_storage,
-            commands::upload_image_file,
+            commands::read_image_file,
+            commands::prepare_image,
+            commands::set_upload_encoding,
             commands::upload_image_bytes,
             commands::image_library,
             commands::update_image,

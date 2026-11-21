@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { AppShell, type PageId } from "@/components/AppShell";
+import { ImportProvider } from "@/components/ImportPanel";
 import { NewPostDialog } from "@/components/NewPostDialog";
 import { Button } from "@/components/ui/button";
 import { useToast } from "@/components/ui/toast";
@@ -112,79 +113,81 @@ function ProjectWindow({ status, info, theme, onThemeChange, onStatus, onClose }
     );
 
   return (
-    <AppShell
-      activePage={page}
-      onPageChange={setPage}
-      theme={theme}
-      onThemeChange={onThemeChange}
-      preview={preview}
-      title={title}
-      project={{ name: config?.title ?? status.dir ?? "", path: status.dir ?? "" }}
-      onSwitchProject={() => void leave()}
-    >
-      <PageSlot active={page === "posts"}>
-        {status.error || !config ? (
-          <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center text-[13px] text-fg-2">
-            {status.error ?? "无法读取博客配置。"}
-            <Button variant="outline" onClick={() => void leave()}>
-              回到欢迎页
-            </Button>
-          </div>
-        ) : editing ? (
-          <EditorPage
-            key={editing}
-            id={editing}
-            config={config}
-            preview={preview}
-            posts={posts ?? []}
-            onClose={() => {
-              setEditing(null);
-              void refreshPosts();
-            }}
-            onSaved={onSaved}
-            onPublished={(id) => void openPost(id)}
-            flushRef={flush}
-          />
-        ) : (
-          <PostsPage
-            posts={posts}
-            onOpen={setEditing}
-            onRefresh={() => void refreshPosts()}
-            actions={
-              <Button onClick={() => setCreating(true)}>
-                <Plus />
-                新建
+    <ImportProvider>
+      <AppShell
+        activePage={page}
+        onPageChange={setPage}
+        theme={theme}
+        onThemeChange={onThemeChange}
+        preview={preview}
+        title={title}
+        project={{ name: config?.title ?? status.dir ?? "", path: status.dir ?? "" }}
+        onSwitchProject={() => void leave()}
+      >
+        <PageSlot active={page === "posts"}>
+          {status.error || !config ? (
+            <div className="flex h-full flex-col items-center justify-center gap-3 px-8 text-center text-[13px] text-fg-2">
+              {status.error ?? "无法读取博客配置。"}
+              <Button variant="outline" onClick={() => void leave()}>
+                回到欢迎页
               </Button>
-            }
-          />
-        )}
-      </PageSlot>
-      <PageSlot active={page === "images"}>
-        <ImagesPage onOpenPost={(id) => void openPost(id)} />
-      </PageSlot>
-      <PageSlot active={page === "config"}>
-        <ConfigPage preview={preview} onStatus={onStatus} />
-      </PageSlot>
-      <PageSlot active={page === "preview"}>
-        <PreviewPage preview={preview} />
-      </PageSlot>
-      <PageSlot active={page === "source"}>
-        <SourcePage />
-      </PageSlot>
-      <PageSlot active={page === "deploy"}>
-        <DeployPage config={config} />
-      </PageSlot>
-      <PageSlot active={page === "settings"}>
-        <SettingsPage status={status} info={info} onStatus={onStatus} onSwitchProject={() => void leave()} />
-      </PageSlot>
-      <NewPostDialog
-        open={creating}
-        onClose={() => setCreating(false)}
-        onCreated={(id) => {
-          setCreating(false);
-          void openPost(id);
-        }}
-      />
-    </AppShell>
+            </div>
+          ) : editing ? (
+            <EditorPage
+              key={editing}
+              id={editing}
+              config={config}
+              preview={preview}
+              posts={posts ?? []}
+              onClose={() => {
+                setEditing(null);
+                void refreshPosts();
+              }}
+              onSaved={onSaved}
+              onPublished={(id) => void openPost(id)}
+              flushRef={flush}
+            />
+          ) : (
+            <PostsPage
+              posts={posts}
+              onOpen={setEditing}
+              onRefresh={() => void refreshPosts()}
+              actions={
+                <Button onClick={() => setCreating(true)}>
+                  <Plus />
+                  新建
+                </Button>
+              }
+            />
+          )}
+        </PageSlot>
+        <PageSlot active={page === "images"}>
+          <ImagesPage onOpenPost={(id) => void openPost(id)} />
+        </PageSlot>
+        <PageSlot active={page === "config"}>
+          <ConfigPage preview={preview} onStatus={onStatus} />
+        </PageSlot>
+        <PageSlot active={page === "preview"}>
+          <PreviewPage preview={preview} />
+        </PageSlot>
+        <PageSlot active={page === "source"}>
+          <SourcePage />
+        </PageSlot>
+        <PageSlot active={page === "deploy"}>
+          <DeployPage config={config} />
+        </PageSlot>
+        <PageSlot active={page === "settings"}>
+          <SettingsPage status={status} info={info} onStatus={onStatus} onSwitchProject={() => void leave()} />
+        </PageSlot>
+        <NewPostDialog
+          open={creating}
+          onClose={() => setCreating(false)}
+          onCreated={(id) => {
+            setCreating(false);
+            void openPost(id);
+          }}
+        />
+      </AppShell>
+    </ImportProvider>
   );
 }
