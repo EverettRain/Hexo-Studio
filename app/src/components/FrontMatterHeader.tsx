@@ -1,4 +1,4 @@
-import { AlignLeft, CalendarDays, ChevronRight, Code2, FolderTree, Image as ImageIcon, PanelTop, Tags, X } from "lucide-react";
+import { AlignLeft, CalendarDays, ChevronDown, Code2, FolderTree, Image as ImageIcon, PanelTop, Tags, X } from "lucide-react";
 import { useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { DatePicker } from "@/components/DatePicker";
 import { TagInput } from "@/components/TagInput";
@@ -132,27 +132,45 @@ export function FrontMatterHeader({ yaml, onChange, onError, timezone, tagSugges
 
   const topImg = values.top_img;
   const topMode = topImg === false ? "off" : text(topImg) ? "image" : "default";
+  const headerButton = "flex h-6 items-center gap-1 rounded-md px-1.5 text-[12px] text-muted hover:bg-pill hover:text-fg";
 
   return (
     // Left edge on the body's text: CodeMirror's 24px content padding plus its 6px line padding.
-    <div className="max-w-[820px] pl-[30px] pr-6 pt-7">
-      {showSource ? (
-        <div className="mb-2 space-y-1.5">
-          <div className="flex items-center justify-between text-[12px] text-muted">
-            <span>front-matter 源码</span>
-            {parsed.values !== null && (
-              <button type="button" onClick={() => setSource(false)} className="h-6 rounded-md px-2 hover:bg-pill hover:text-fg">
+    // The panel reaches 12px past it on each side, so the values inside line up with the text.
+    <div className="max-w-[820px] pb-6 pl-[30px] pr-6 pt-7">
+      {!showSource && (
+        <AutoText value={text(values.title)} onChange={(v) => set("title", v)} onEnter={onEnterBody} placeholder="无标题" className="text-[26px] font-semibold leading-[1.3] tracking-[-0.015em]" />
+      )}
+      {/* A flat card on the window's gray, which is also the body's ground: no border or shadow. */}
+      <section aria-label="文章属性" className={cn("-mx-3 rounded-xl bg-card px-3 pb-2.5 pt-1.5", !showSource && "mt-4")}>
+        <div className="flex h-8 items-center gap-0.5">
+          <span className="flex-1 text-[11.5px] font-medium tracking-[0.02em] text-muted">{showSource ? "front-matter 源码" : "文章属性"}</span>
+          {showSource ? (
+            parsed.values !== null && (
+              <button type="button" onClick={() => setSource(false)} className={headerButton}>
                 返回属性
               </button>
-            )}
-          </div>
-          <AutoText value={yaml} onChange={onChange} className="selectable rounded-lg bg-pill px-3 py-2 font-mono text-[12.5px] leading-5" />
-          {parsed.error && <p className="text-[12px] text-danger">YAML 有误：{parsed.error}</p>}
+            )
+          ) : (
+            <>
+              <button type="button" onClick={() => setMore((m) => !m)} aria-expanded={more} className={cn(headerButton, more && "text-fg")}>
+                <ChevronDown className={cn("h-3.5 w-3.5 transition-transform", more && "rotate-180")} />
+                {more ? "收起" : "更多属性"}
+              </button>
+              <button type="button" onClick={() => setSource(true)} title="其他字段（如 swiper_index、abbrlink）在源码里修改；保存时原样保留" className={headerButton}>
+                <Code2 className="h-3.5 w-3.5" />
+                源码
+              </button>
+            </>
+          )}
         </div>
-      ) : (
-        <>
-          <AutoText value={text(values.title)} onChange={(v) => set("title", v)} onEnter={onEnterBody} placeholder="无标题" className="text-[26px] font-semibold leading-[1.3] tracking-[-0.015em]" />
-          <div className="mt-3 space-y-0.5">
+        {showSource ? (
+          <div className="space-y-1.5">
+            <AutoText value={yaml} onChange={onChange} className="selectable rounded-lg bg-pill px-3 py-2 font-mono text-[12.5px] leading-5" />
+            {parsed.error && <p className="text-[12px] text-danger">YAML 有误：{parsed.error}</p>}
+          </div>
+        ) : (
+          <div className="space-y-0.5">
             <Prop icon={CalendarDays} label="日期" hint={`时区：${timezone ?? "本机"}`}>
               <DatePicker value={text(values.date)} onChange={(v) => set("date", v)} timezone={timezone} />
             </Prop>
@@ -169,7 +187,7 @@ export function FrontMatterHeader({ yaml, onChange, onError, timezone, tagSugges
               <ImageValue url={text(values.cover)} index={images} onPick={() => onPickImage("cover")} onChange={(v) => set("cover", v)} />
             </Prop>
             {more && (
-              <>
+              <div className="!mt-2 space-y-0.5 border-t-[0.5px] border-line pt-2">
                 <Prop icon={PanelTop} label="顶部图" hint="top_img">
                   <div className="space-y-1">
                     <Segmented
@@ -204,22 +222,11 @@ export function FrontMatterHeader({ yaml, onChange, onError, timezone, tagSugges
                 <Prop icon={AlignLeft} label="版权声明" hint="copyright_info">
                   <AutoText value={text(values.copyright_info)} onChange={(v) => set("copyright_info", v)} placeholder="留空用主题默认" className="rounded-md px-1.5 py-[3px] text-[13px] leading-[21px] hover:bg-pill focus:bg-pill" />
                 </Prop>
-              </>
+              </div>
             )}
           </div>
-          <div className="mt-1.5 flex items-center gap-1 text-[12px] text-muted">
-            <button type="button" onClick={() => setMore((m) => !m)} className="flex h-6 items-center gap-1 rounded-md px-1.5 hover:bg-pill hover:text-fg">
-              <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", more && "rotate-90")} />
-              {more ? "收起主题属性" : "更多属性"}
-            </button>
-            <button type="button" onClick={() => setSource(true)} title="其他字段（如 swiper_index、abbrlink）在源码里修改；保存时原样保留" className="flex h-6 items-center gap-1 rounded-md px-1.5 hover:bg-pill hover:text-fg">
-              <Code2 className="h-3.5 w-3.5" />
-              源码
-            </button>
-          </div>
-        </>
-      )}
-      <div className="mt-3 border-b-[0.5px] border-line-2" />
+        )}
+      </section>
     </div>
   );
 }

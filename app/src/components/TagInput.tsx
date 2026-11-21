@@ -78,14 +78,15 @@ export function TagInput({ value, onChange, suggestions = [], placeholder, hiera
         {value.map((t, i) => (
           <span key={t} className="flex items-center gap-1">
             {hierarchy && i > 0 && <ChevronRight className="h-3 w-3 text-faint" />}
-            <span className="group flex h-[22px] items-center rounded-[5px] bg-card pl-2 pr-0.5 text-[12.5px] text-fg shadow-edge dark:bg-white/[.08]">
+            {/* Flat chips one shade under the field's own hover fill, so they show on both. */}
+            <span className="group flex h-[22px] items-center rounded-[5px] bg-pill-hover pl-2 pr-0.5 text-[12.5px] text-fg">
               {t}
               <button
                 type="button"
                 aria-label={`移除 ${t}`}
                 onMouseDown={(e) => e.preventDefault()}
                 onClick={() => onChange(value.filter((x) => x !== t))}
-                className="ml-0.5 flex h-[18px] w-[18px] items-center justify-center rounded text-faint hover:bg-pill hover:text-fg"
+                className="ml-0.5 flex h-[18px] w-[18px] items-center justify-center rounded text-muted hover:bg-card hover:text-fg"
               >
                 <X className="h-3 w-3" />
               </button>
