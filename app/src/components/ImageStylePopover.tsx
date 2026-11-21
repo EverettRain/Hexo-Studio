@@ -28,7 +28,7 @@ function Field({ label, value, onChange, placeholder, presets }: { label: string
               key={p}
               type="button"
               onClick={() => onChange(value === p ? "" : p)}
-              className={cn("h-6 rounded-[5px] px-1.5 font-mono text-[11px] active:!scale-100", value === p ? "bg-fg text-card" : "text-muted hover:bg-pill hover:text-fg")}
+              className={cn("h-6 rounded-sm px-1.5 font-mono text-[11px] active:!scale-100", value === p ? "bg-fg text-card" : "text-muted hover:bg-pill hover:text-fg")}
             >
               {p.replace("px", "")}
             </button>

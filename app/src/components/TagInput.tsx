@@ -79,7 +79,7 @@ export function TagInput({ value, onChange, suggestions = [], placeholder, hiera
           <span key={t} className="flex items-center gap-1">
             {hierarchy && i > 0 && <ChevronRight className="h-3 w-3 text-faint" />}
             {/* Flat chips one shade under the field's own hover fill, so they show on both. */}
-            <span className="group flex h-[22px] items-center rounded-[5px] bg-pill-hover pl-2 pr-0.5 text-[12.5px] text-fg">
+            <span className="group flex h-[22px] items-center rounded-sm bg-pill-hover pl-2 pr-0.5 text-[12.5px] text-fg">
               {t}
               <button
                 type="button"

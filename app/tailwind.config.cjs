@@ -19,13 +19,25 @@ module.exports = {
         ok: { DEFAULT: token("ok"), soft: token("ok-soft") },
         danger: { DEFAULT: token("danger"), soft: token("danger-soft") },
         warn: { DEFAULT: token("warn"), soft: token("warn-soft") },
+        raised: { DEFAULT: "var(--raised)", strong: "var(--raised-strong)" },
+        scrim: "var(--scrim)",
       },
       boxShadow: {
         edge: "var(--edge)",
         card: "var(--card-edge)",
         pop: "var(--shadow)",
       },
-      borderRadius: { sm: "5px", md: "6px", lg: "8px", xl: "12px", "2xl": "14px" },
+      // Every size is the theme's (index.css); `full` stays round.
+      borderRadius: {
+        DEFAULT: "var(--radius)",
+        sm: "var(--radius-sm)",
+        md: "var(--radius-md)",
+        control: "var(--radius-control)",
+        lg: "var(--radius-lg)",
+        item: "var(--radius-item)",
+        xl: "var(--radius-xl)",
+        "2xl": "var(--radius-2xl)",
+      },
       fontFamily: {
         sans: [
           "-apple-system", "BlinkMacSystemFont", '"SF Pro Text"', '"Segoe UI Variable Text"', '"Segoe UI"',

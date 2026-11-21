@@ -319,7 +319,7 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
           <ChevronLeft />
           文章
         </Button>
-        <span className={cn("rounded-[5px] px-1.5 py-px text-[11px] font-medium", file.summary.kind === "draft" ? "bg-warn-soft text-warn" : "bg-ok-soft text-ok")}>
+        <span className={cn("rounded-sm px-1.5 py-px text-[11px] font-medium", file.summary.kind === "draft" ? "bg-warn-soft text-warn" : "bg-ok-soft text-ok")}>
           {file.summary.kind === "draft" ? "草稿" : "已发布"}
         </span>
         <span className="min-w-0 truncate font-mono text-[12px] text-muted">{file.summary.fileName}</span>
@@ -337,20 +337,20 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
           title={cards ? "图片显示为源码（手工改写时用）" : "图片显示为图片和名称"}
           aria-pressed={!cards}
           onClick={() => setCards((c) => !c)}
-          className={cn("flex h-[26px] w-[26px] items-center justify-center rounded-[7px] text-muted hover:bg-pill hover:text-fg", !cards && "bg-pill text-fg")}
+          className={cn("flex h-[26px] w-[26px] items-center justify-center rounded-control text-muted hover:bg-pill hover:text-fg", !cards && "bg-pill text-fg")}
         >
           <Code2 className="h-[15px] w-[15px]" />
         </button>
-        <button title="查找与替换  ⌘F" onClick={() => editor.current?.openSearch()} className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] text-muted hover:bg-pill hover:text-fg">
+        <button title="查找与替换  ⌘F" onClick={() => editor.current?.openSearch()} className="flex h-[26px] w-[26px] items-center justify-center rounded-control text-muted hover:bg-pill hover:text-fg">
           <Search className="h-[15px] w-[15px]" />
         </button>
-        <button title="在 Finder 中显示" onClick={() => void api.revealPost(id).catch((e) => toast(errorText(e), "error"))} className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] text-muted hover:bg-pill hover:text-fg">
+        <button title="在 Finder 中显示" onClick={() => void api.revealPost(id).catch((e) => toast(errorText(e), "error"))} className="flex h-[26px] w-[26px] items-center justify-center rounded-control text-muted hover:bg-pill hover:text-fg">
           <FolderSearch className="h-[15px] w-[15px]" />
         </button>
-        <button title="用默认编辑器打开" onClick={() => void api.openPostExternally(id).catch((e) => toast(errorText(e), "error"))} className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] text-muted hover:bg-pill hover:text-fg">
+        <button title="用默认编辑器打开" onClick={() => void api.openPostExternally(id).catch((e) => toast(errorText(e), "error"))} className="flex h-[26px] w-[26px] items-center justify-center rounded-control text-muted hover:bg-pill hover:text-fg">
           <ExternalLink className="h-[15px] w-[15px]" />
         </button>
-        <button title={showPreview ? "隐藏预览" : "显示预览"} onClick={() => setShowPreview((s) => !s)} className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] text-muted hover:bg-pill hover:text-fg">
+        <button title={showPreview ? "隐藏预览" : "显示预览"} onClick={() => setShowPreview((s) => !s)} className="flex h-[26px] w-[26px] items-center justify-center rounded-control text-muted hover:bg-pill hover:text-fg">
           {showPreview ? <PanelRightClose className="h-[15px] w-[15px]" /> : <PanelRightOpen className="h-[15px] w-[15px]" />}
         </button>
       </div>

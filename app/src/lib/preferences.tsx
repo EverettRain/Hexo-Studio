@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api, type ThemeMode, type UiPreferences, type UserView } from "@/lib/api";
 import { applyTheme, watchSystemTheme } from "@/lib/theme";
 
-export const DEFAULT_UI: UiPreferences = { mode: "system", previewShare: null, webStorageMigrated: true };
+export const DEFAULT_UI: UiPreferences = { mode: "system", theme: "default", previewShare: null, webStorageMigrated: true };
 
 /** Where the interface kept these before preferences existed. */
 export const WEB_STORAGE_KEYS = { mode: "hexo-studio.theme", previewShare: "hexo-studio.preview-width" } as const;
@@ -68,9 +68,9 @@ export function PreferencesProvider({ initial, children }: { initial: Boot; chil
   }, []);
 
   useEffect(() => {
-    applyTheme(ui.mode);
-    return watchSystemTheme(ui.mode);
-  }, [ui.mode]);
+    applyTheme(ui.mode, ui.theme);
+    return watchSystemTheme(ui.mode, ui.theme);
+  }, [ui.mode, ui.theme]);
 
   const value = useMemo(() => ({ ui, update, user, setUser }), [ui, update, user]);
   return <Ctx.Provider value={value}>{children}</Ctx.Provider>;

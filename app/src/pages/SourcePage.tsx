@@ -361,8 +361,8 @@ export function SourcePage() {
                 }}
                 aria-pressed={viewingCommit && picked?.hash === c.hash}
                 className={cn(
-                  "block w-full rounded-[7px] px-2 py-1.5 text-left active:!scale-100",
-                  viewingCommit && picked?.hash === c.hash ? "bg-card shadow-edge dark:bg-white/[.07]" : "hover:bg-pill",
+                  "block w-full rounded-control px-2 py-1.5 text-left active:!scale-100",
+                  viewingCommit && picked?.hash === c.hash ? "bg-raised shadow-edge" : "hover:bg-pill",
                 )}
               >
                 <div className="line-clamp-2 text-[13px] leading-5">{c.subject}</div>

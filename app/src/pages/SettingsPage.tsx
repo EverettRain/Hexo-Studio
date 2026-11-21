@@ -10,6 +10,7 @@ import { Segmented } from "@/components/ui/segmented";
 import { useToast } from "@/components/ui/toast";
 import { api, errorText, type AppInfo, type BlogStatus, type ThemeMode } from "@/lib/api";
 import { usePreferences, useTheme } from "@/lib/preferences";
+import { THEMES, themeOf } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
 interface SettingsPageProps {
@@ -23,7 +24,7 @@ type SectionId = "user" | "editor" | "project" | "node" | "about";
 
 const SECTIONS: { id: SectionId; label: string; hint: string; icon: React.ComponentType<{ className?: string }> }[] = [
   { id: "user", label: "用户", hint: "头像、名字", icon: User },
-  { id: "editor", label: "编辑器", hint: "外观", icon: Paintbrush },
+  { id: "editor", label: "编辑器", hint: "主题、明暗", icon: Paintbrush },
   { id: "project", label: "项目", hint: "当前博客与站点", icon: FolderSearch },
   { id: "node", label: "Node", hint: "运行 Hexo 的 Node", icon: Server },
   { id: "about", label: "关于", hint: "版本与更新、数据目录", icon: Info },
@@ -148,12 +149,35 @@ function UserSection() {
 
 function EditorSection() {
   const [mode, setMode] = useTheme();
+  const { ui, update } = usePreferences();
+  const current = themeOf(ui.theme).id;
   return (
-    <Group label="外观">
-      <Row label="明暗" hint="顶栏右上角的按钮也能切换。">
-        <Segmented value={mode} options={MODES} onChange={setMode} />
-      </Row>
-    </Group>
+    <>
+      <Group label="主题">
+        <div className="grid grid-cols-2 gap-2 p-3">
+          {THEMES.map((t) => (
+            <button
+              key={t.id}
+              type="button"
+              onClick={() => update({ theme: t.id })}
+              aria-pressed={current === t.id}
+              className={cn(
+                "rounded-lg px-3.5 py-3 text-left active:!scale-100",
+                current === t.id ? "bg-brand-soft shadow-[inset_0_0_0_1.5px_rgb(var(--brand))]" : "bg-pill hover:bg-pill-hover",
+              )}
+            >
+              <div className={cn("text-[13px] font-semibold", current === t.id && "text-brand")}>{t.name}</div>
+              <div className="mt-0.5 text-[12px] leading-[18px] text-fg-2">{t.description}</div>
+            </button>
+          ))}
+        </div>
+      </Group>
+      <Group label="明暗">
+        <Row label="明暗" hint="每个主题都有浅色和深色；顶栏右上角的按钮也能切换。">
+          <Segmented value={mode} options={MODES} onChange={setMode} />
+        </Row>
+      </Group>
+    </>
   );
 }
 

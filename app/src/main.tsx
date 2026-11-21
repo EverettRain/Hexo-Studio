@@ -14,7 +14,7 @@ document.addEventListener("contextmenu", (e) => {
 
 // The window is shown after the first frame, which waits for the preferences (its colours).
 void loadPreferences().then((boot) => {
-  applyTheme(boot.ui.mode);
+  applyTheme(boot.ui.mode, boot.ui.theme);
   ReactDOM.createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
       <PreferencesProvider initial={boot}>

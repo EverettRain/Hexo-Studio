@@ -28,6 +28,10 @@ pub enum Mode {
 #[serde(rename_all = "camelCase", default)]
 pub struct UiPreferences {
     pub mode: Mode,
+    /// The interface's theme by id (`default`, ...). Text rather than a closed list, so a theme
+    /// this version does not know (written by a newer one) falls back to the default in the
+    /// interface instead of making the whole file unreadable.
+    pub theme: String,
     /// The editor's preview column, as a share of the editor's width; `None` until it is dragged.
     pub preview_share: Option<f32>,
     /// The values the interface kept in the WebView's storage before preferences existed have
@@ -119,6 +123,20 @@ mod tests {
         assert_eq!(p.recent, vec![RecentProject { path: "/b".into(), opened_at: 5 }]);
         assert_eq!(p.backup_dir.as_deref(), Some("/x"));
         assert_eq!(p.ui, UiPreferences::default());
+    }
+
+    #[test]
+    fn an_unknown_theme_keeps_the_rest_readable() {
+        // Arrange
+        let saved = r#"{"recent":[{"path":"/b","openedAt":5}],"ui":{"mode":"dark","theme":"from-a-newer-version"}}"#;
+
+        // Act
+        let p: Preferences = serde_json::from_str(saved).unwrap();
+
+        // Assert
+        assert_eq!(p.recent.len(), 1);
+        assert_eq!(p.ui.mode, Mode::Dark);
+        assert_eq!(p.ui.theme, "from-a-newer-version");
     }
 
     #[test]

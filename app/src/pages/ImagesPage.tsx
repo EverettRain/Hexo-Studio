@@ -349,7 +349,7 @@ export function ImagesPage({ onOpenPost }: ImagesPageProps) {
                 ["problem", "有问题"],
               ] as const
             ).map(([f, label]) => (
-              <button key={f} onClick={() => setFilter(f)} className={cn("h-7 rounded-md px-2.5 active:!scale-100", filter === f ? "bg-card font-medium shadow-edge dark:bg-white/[.1]" : "text-muted hover:text-fg")}>
+              <button key={f} onClick={() => setFilter(f)} className={cn("h-7 rounded-md px-2.5 active:!scale-100", filter === f ? "bg-raised-strong font-medium shadow-edge" : "text-muted hover:text-fg")}>
                 {label} {counts[f]}
               </button>
             ))}

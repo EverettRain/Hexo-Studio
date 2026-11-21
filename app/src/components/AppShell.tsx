@@ -52,7 +52,7 @@ function NavRow({ item, active, onSelect, setRef }: { item: NavItem; active: boo
       onClick={onSelect}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "relative z-10 flex h-[30px] w-full items-center gap-[9px] rounded-[7px] px-2 text-left text-[13px] active:!scale-100",
+        "relative z-10 flex h-[30px] w-full items-center gap-[9px] rounded-control px-2 text-left text-[13px] active:!scale-100",
         active ? "font-medium text-fg" : "text-fg-2 hover:bg-pill hover:text-fg",
       )}
     >
@@ -109,9 +109,9 @@ export function AppShell({ activePage, onPageChange, theme, onThemeChange, previ
           <button
             onClick={onSwitchProject}
             title={`${project.path}\n点击切换项目`}
-            className="flex w-full items-center gap-2.5 rounded-[9px] px-2 py-1.5 text-left hover:bg-pill active:!scale-100"
+            className="flex w-full items-center gap-2.5 rounded-item px-2 py-1.5 text-left hover:bg-pill active:!scale-100"
           >
-            <img src={appIcon} alt="" className="pointer-events-none h-7 w-7 shrink-0 rounded-[7px]" draggable={false} />
+            <img src={appIcon} alt="" className="pointer-events-none h-7 w-7 shrink-0 rounded-control" draggable={false} />
             <span className="min-w-0 flex-1">
               <span className="block truncate text-[13px] font-semibold leading-4">{project.name}</span>
               <span className="block truncate text-[11px] leading-4 text-muted">{project.path.split("/").pop()}</span>
@@ -124,7 +124,7 @@ export function AppShell({ activePage, onPageChange, theme, onThemeChange, previ
           {thumb !== null && (
             <span
               aria-hidden
-              className="absolute inset-x-2.5 h-[30px] rounded-[7px] bg-card shadow-edge transition-[top] duration-300 ease-soft dark:bg-white/[.07]"
+              className="absolute inset-x-2.5 h-[30px] rounded-control bg-raised shadow-edge transition-[top] duration-300 ease-soft"
               style={{ top: thumb }}
             />
           )}
@@ -143,7 +143,7 @@ export function AppShell({ activePage, onPageChange, theme, onThemeChange, previ
 
         {/* The user, as in Claude Desktop: who is working here, and the way into settings. */}
         <div className="shrink-0 border-t-[0.5px] border-line-2 p-2">
-          <div className={cn("flex h-11 items-center gap-2.5 rounded-[9px] pl-2 pr-1", onSettings ? "bg-card shadow-edge dark:bg-white/[.07]" : "")}>
+          <div className={cn("flex h-11 items-center gap-2.5 rounded-item pl-2 pr-1", onSettings ? "bg-raised shadow-edge" : "")}>
             <Avatar user={user} className="h-7 w-7 text-[12px]" />
             <span className="min-w-0 flex-1 truncate text-[13px] font-medium">{user?.name ?? ""}</span>
             <button
@@ -152,7 +152,7 @@ export function AppShell({ activePage, onPageChange, theme, onThemeChange, previ
               aria-label="设置"
               aria-current={onSettings ? "page" : undefined}
               className={cn(
-                "flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-[7px] hover:bg-pill hover:text-fg",
+                "flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-control hover:bg-pill hover:text-fg",
                 onSettings ? "text-fg" : "text-muted",
               )}
             >
@@ -173,7 +173,7 @@ export function AppShell({ activePage, onPageChange, theme, onThemeChange, previ
               onClick={() => onThemeChange(nextTheme[theme])}
               title={`主题：${themeLabel[theme]}（点击切换）`}
               aria-label={`主题：${themeLabel[theme]}`}
-              className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] text-muted hover:bg-pill hover:text-fg"
+              className="flex h-[26px] w-[26px] items-center justify-center rounded-control text-muted hover:bg-pill hover:text-fg"
             >
               <ThemeIcon className="h-[15px] w-[15px]" />
             </button>

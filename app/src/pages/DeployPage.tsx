@@ -214,7 +214,7 @@ export function DeployPage({ config }: DeployPageProps) {
               <button
                 key={r.id}
                 onClick={() => setSelected(r.id)}
-                className={cn("flex w-full items-center gap-2 rounded-[7px] px-2 py-1.5 text-left active:!scale-100", shown?.id === r.id ? "bg-card shadow-edge dark:bg-white/[.07]" : "hover:bg-pill")}
+                className={cn("flex w-full items-center gap-2 rounded-control px-2 py-1.5 text-left active:!scale-100", shown?.id === r.id ? "bg-raised shadow-edge" : "hover:bg-pill")}
               >
                 <StatusIcon run={r} />
                 <div className="min-w-0">

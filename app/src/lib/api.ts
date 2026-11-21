@@ -18,6 +18,8 @@ export type ThemeMode = "system" | "light" | "dark";
 /** What only the interface reads and writes, kept in the user's preferences. */
 export interface UiPreferences {
   mode: ThemeMode;
+  /** A theme id from `lib/theme`'s THEMES; anything else shows the default. */
+  theme: string;
   /** The editor's preview column as a share of its width; null until dragged. */
   previewShare: number | null;
   /** Values kept in the WebView's storage before preferences existed were brought over. */

@@ -80,7 +80,7 @@ export function ImagePicker({ open, purpose, onClose, postId, onPick, onCover }:
           {postId && (
             <div className="flex h-8 items-center rounded-lg bg-pill p-0.5 text-[12.5px]">
               {(["post", "all"] as const).map((s) => (
-                <button key={s} onClick={() => setScope(s)} className={cn("h-7 rounded-md px-3 active:!scale-100", scope === s ? "bg-card font-medium shadow-edge dark:bg-white/[.1]" : "text-muted hover:text-fg")}>
+                <button key={s} onClick={() => setScope(s)} className={cn("h-7 rounded-md px-3 active:!scale-100", scope === s ? "bg-raised-strong font-medium shadow-edge" : "text-muted hover:text-fg")}>
                   {s === "post" ? "本文" : "全部"}
                 </button>
               ))}

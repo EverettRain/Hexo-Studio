@@ -68,7 +68,7 @@ export function WelcomePage({ version, theme, onThemeChange, onOpened }: Welcome
         <button
           onClick={() => onThemeChange(nextTheme[theme])}
           title="切换主题"
-          className="flex h-[26px] w-[26px] items-center justify-center rounded-[7px] text-muted hover:bg-pill hover:text-fg"
+          className="flex h-[26px] w-[26px] items-center justify-center rounded-control text-muted hover:bg-pill hover:text-fg"
         >
           <ThemeIcon className="h-[15px] w-[15px]" />
         </button>

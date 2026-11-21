@@ -5,6 +5,10 @@
 /*
  * Design tokens (RGB triplets so Tailwind can apply alpha).
  * Quiet graphite surfaces, hairline separators, indigo reserved for things that act.
+ *
+ * A theme (`<html data-theme="…">`, docs/design.md section 16.4) overrides these variables, for
+ * light and with `.dark`; components never branch on the theme. The default theme is the
+ * `:root` / `.dark` blocks below.
  */
 @layer base {
   :root {
@@ -34,6 +38,20 @@
     --card-edge: 0 0 0 0.5px rgba(20, 22, 30, 0.08), 0 1px 2px rgba(20, 22, 30, 0.04);
     --shadow: 0 16px 44px rgba(20, 22, 30, 0.16), 0 2px 8px rgba(20, 22, 30, 0.06), 0 0 0 0.5px rgba(20, 22, 30, 0.1);
     --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+    /* Corner sizes, smallest to largest; Tailwind's rounded-* point here. */
+    --radius: 4px;
+    --radius-sm: 5px;
+    --radius-md: 6px;
+    --radius-control: 7px;
+    --radius-lg: 8px;
+    --radius-item: 9px;
+    --radius-xl: 12px;
+    --radius-2xl: 14px;
+    /* The chosen item that stands out of its surface (a selected row, a segment). */
+    --raised: rgb(var(--card));
+    --raised-strong: rgb(var(--card));
+    /* Behind a dialog. */
+    --scrim: rgb(0 0 0 / 0.2);
     color-scheme: light;
   }
 
@@ -63,6 +81,9 @@
     --edge: inset 0 0.5px 0 rgba(255, 255, 255, 0.08), 0 1px 2px rgba(0, 0, 0, 0.3);
     --card-edge: 0 0 0 0.5px rgba(255, 255, 255, 0.07), 0 1px 2px rgba(0, 0, 0, 0.2);
     --shadow: 0 16px 44px rgba(0, 0, 0, 0.55), 0 2px 8px rgba(0, 0, 0, 0.3), 0 0 0 0.5px rgba(255, 255, 255, 0.1);
+    --raised: rgb(255 255 255 / 0.07);
+    --raised-strong: rgb(255 255 255 / 0.1);
+    --scrim: rgb(0 0 0 / 0.45);
     color-scheme: dark;
   }
 

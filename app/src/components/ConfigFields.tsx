@@ -107,9 +107,9 @@ function ImageValue({ path, value, ctx }: { path: Path; value: string; ctx: Fiel
     <div className="flex items-start gap-2">
       <button type="button" title="从图库选图" onClick={() => ctx.pickImage(path)} className="shrink-0 active:!scale-100">
         {loadable ? (
-          <img src={info!.thumb} alt="" className="h-[46px] w-[70px] rounded-[5px] bg-pill object-cover shadow-edge" />
+          <img src={info!.thumb} alt="" className="h-[46px] w-[70px] rounded-sm bg-pill object-cover shadow-edge" />
         ) : (
-          <span className="flex h-[46px] w-[70px] items-center justify-center rounded-[5px] bg-pill text-faint">
+          <span className="flex h-[46px] w-[70px] items-center justify-center rounded-sm bg-pill text-faint">
             <ImageIcon className="h-4 w-4" />
           </span>
         )}

@@ -14,7 +14,7 @@ describe("fromWebStorage", () => {
     const ui = fromWebStorage(fresh, read);
 
     // Assert
-    expect(ui).toEqual({ mode: "dark", previewShare: 0.35, webStorageMigrated: true });
+    expect(ui).toEqual({ ...DEFAULT_UI, mode: "dark", previewShare: 0.35 });
   });
 
   it("ignores values that are not usable and keeps the defaults", () => {
@@ -30,7 +30,7 @@ describe("fromWebStorage", () => {
 
   it("leaves preferences that were already migrated alone", () => {
     // Arrange
-    const saved: UiPreferences = { mode: "light", previewShare: 0.6, webStorageMigrated: true };
+    const saved: UiPreferences = { mode: "light", theme: "default", previewShare: 0.6, webStorageMigrated: true };
 
     // Act
     const ui = fromWebStorage(saved, storage({ [WEB_STORAGE_KEYS.mode]: "dark" }));

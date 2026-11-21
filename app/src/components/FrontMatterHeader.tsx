@@ -73,20 +73,20 @@ function ImageValue({ url, index, onPick, onChange }: { url: string; index: Imag
   return (
     <div className="group flex items-center gap-2.5 rounded-md p-0.5 hover:bg-pill">
       <button type="button" onClick={onPick} title="换一张" className="shrink-0 active:!scale-100">
-        <img src={info.thumb} alt="" className="h-12 w-[76px] rounded-[5px] bg-pill object-cover shadow-edge" />
+        <img src={info.thumb} alt="" className="h-12 w-[76px] rounded-sm bg-pill object-cover shadow-edge" />
       </button>
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13px]">{info.name}</div>
         <div className="text-[11.5px] text-muted">{info.id ? "图片库" : "不在图片库"}</div>
       </div>
       <div className="flex shrink-0 gap-0.5 opacity-0 group-hover:opacity-100">
-        <button type="button" onClick={onPick} className="h-6 rounded-[5px] px-1.5 text-[12px] text-muted hover:bg-card hover:text-fg">
+        <button type="button" onClick={onPick} className="h-6 rounded-sm px-1.5 text-[12px] text-muted hover:bg-card hover:text-fg">
           换一张
         </button>
-        <button type="button" onClick={() => setEditing(true)} className="h-6 rounded-[5px] px-1.5 text-[12px] text-muted hover:bg-card hover:text-fg">
+        <button type="button" onClick={() => setEditing(true)} className="h-6 rounded-sm px-1.5 text-[12px] text-muted hover:bg-card hover:text-fg">
           地址
         </button>
-        <button type="button" aria-label="清除" onClick={() => onChange("")} className="flex h-6 w-6 items-center justify-center rounded-[5px] text-muted hover:bg-card hover:text-danger">
+        <button type="button" aria-label="清除" onClick={() => onChange("")} className="flex h-6 w-6 items-center justify-center rounded-sm text-muted hover:bg-card hover:text-danger">
           <X className="h-3.5 w-3.5" />
         </button>
       </div>

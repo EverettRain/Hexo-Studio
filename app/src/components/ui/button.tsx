@@ -17,7 +17,7 @@ const sizes = {
   default: "h-8 px-3.5 text-[13px]",
   sm: "h-7 px-2.5 text-[12.5px]",
   icon: "h-8 w-8",
-  iconSm: "h-[26px] w-[26px] rounded-[7px]",
+  iconSm: "h-[26px] w-[26px] rounded-control",
 } as const;
 
 export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElement> {
