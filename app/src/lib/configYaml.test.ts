@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appendItem, blankLike, getIn, merge, outline, pathKey, readConfig, removeItem, setValue } from "./configYaml";
+import { appendItem, blankLike, getIn, joinLink, merge, outline, pathKey, readConfig, removeItem, removeKey, renameKey, setValue, splitLink } from "./configYaml";
 
 const THEME = `# Code Blocks (代码相关)
 # --------------------------------------
@@ -284,5 +284,52 @@ describe("blankLike", () => {
   it("keeps the keys and empties the values", () => {
     // Act / Assert
     expect(blankLike({ title: "x", enable: true, n: 3, links: [{ a: 1 }] })).toEqual({ title: "", enable: false, n: 0, links: [] });
+  });
+});
+
+describe("keys", () => {
+  const MENU = "menu:\n  文章:\n    归档: /archives/ || anzhiyu-icon-box-archive # 归档页\n    标签: /tags/ || anzhiyu-icon-tags\n\n  # 友链:\n  我的:\n    相册: /album/ || anzhiyu-icon-images\nnav:\n  enable: true\n";
+
+  it("renames a key in place, keeping its value, comment and position", () => {
+    // Act
+    const out = renameKey(MENU, ["menu", "文章", "归档"], "时间线");
+
+    // Assert
+    expect(out).toBe(MENU.replace("    归档:", "    时间线:"));
+  });
+
+  it("refuses a name the parent already has", () => {
+    // Act / Assert
+    expect(() => renameKey(MENU, ["menu", "文章", "归档"], "标签")).toThrow();
+  });
+
+  it("removes a key with every line of its value and keeps the comments around it", () => {
+    // Act
+    const one = removeKey(MENU, ["menu", "文章", "标签"]);
+    const group = removeKey(MENU, ["menu", "我的"]);
+
+    // Assert
+    expect(one).toBe(MENU.replace("    标签: /tags/ || anzhiyu-icon-tags\n", ""));
+    expect(getIn(data(group), ["menu"])).toEqual({ 文章: { 归档: "/archives/ || anzhiyu-icon-box-archive", 标签: "/tags/ || anzhiyu-icon-tags" } });
+    expect(group).toContain("  # 友链:\n");
+  });
+
+  it("adds a menu item after the others at their indent", () => {
+    // Act
+    const out = setValue(MENU, ["menu", "文章", "分类"], joinLink("/categories/", "anzhiyu-icon-shapes"));
+
+    // Assert
+    expect(out).toContain("    标签: /tags/ || anzhiyu-icon-tags\n    分类: /categories/ || anzhiyu-icon-shapes\n");
+  });
+});
+
+describe("link || icon", () => {
+  it("splits and joins anzhiyu's link values", () => {
+    // Act / Assert
+    expect(splitLink("/archives/ || anzhiyu-icon-box-archive")).toEqual({ link: "/archives/", icon: "anzhiyu-icon-box-archive" });
+    expect(splitLink("https://x.com/a||fab fa-x")).toEqual({ link: "https://x.com/a", icon: "fab fa-x" });
+    expect(splitLink("/plain/")).toBeNull();
+    expect(joinLink(" /a/ ", "icon")).toBe("/a/ || icon");
+    expect(joinLink("/a/", " ")).toBe("/a/");
   });
 });

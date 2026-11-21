@@ -1,7 +1,9 @@
-import { ChevronRight, EyeOff, Plus, RotateCcw, TriangleAlert, X } from "lucide-react";
+import { ChevronRight, EyeOff, ImageIcon, Images, Plus, RotateCcw, TriangleAlert, X } from "lucide-react";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Switch } from "@/components/ui/switch";
-import { blankLike, merge, pathKey, sameValue, type Path } from "@/lib/configYaml";
+import { blankLike, joinLink, merge, pathKey, sameValue, splitLink, type Path } from "@/lib/configYaml";
+import { describeImage, type ImageIndex } from "@/lib/images";
+import { looksLikeImage } from "@/lib/themeGroups";
 import { cn } from "@/lib/utils";
 
 export interface FieldContext {
@@ -12,9 +14,19 @@ export interface FieldContext {
   hidden: Set<string>;
   /** Paths that change post addresses, flagged as such. */
   addressKeys: Set<string>;
+  /** Paths a panel above already edits; not listed again. */
+  skip: Set<string>;
+  /** Library images by address, for thumbnails and names. */
+  images: ImageIndex;
+  /** Opens the image library; the chosen image's address goes to `path`. */
+  pickImage: (path: Path) => void;
   set: (path: Path, value: unknown) => void;
+  /** Several values in one save. */
+  setMany: (changes: [Path, unknown][]) => void;
   append: (path: Path, value: unknown) => void;
   remove: (path: Path, index: number) => void;
+  renameKey: (path: Path, name: string) => void;
+  removeKey: (path: Path) => void;
 }
 
 const isObject = (v: unknown): v is Record<string, unknown> => v !== null && typeof v === "object" && !Array.isArray(v) && !(v instanceof Date);
@@ -72,10 +84,57 @@ function NumberValue({ value, onCommit }: { value: number; onCommit: (v: number)
   );
 }
 
+/** anzhiyu's `link || icon` value as two boxes; an empty icon writes the link alone. */
+function LinkValue({ value, onCommit }: { value: string; onCommit: (v: string) => void }) {
+  const { link, icon } = splitLink(value) ?? { link: value, icon: "" };
+  return (
+    <div className="flex gap-1.5">
+      <div className="min-w-0 flex-1">
+        <TextValue value={link} placeholder="链接，如 /archives/" onCommit={(v) => onCommit(joinLink(v, icon))} />
+      </div>
+      <div className="w-[42%] shrink-0 font-mono">
+        <TextValue value={icon} placeholder="图标，如 anzhiyu-icon-github" onCommit={(v) => onCommit(joinLink(link, v))} />
+      </div>
+    </div>
+  );
+}
+
+/** An image address: its picture and library name beside the address, and the library to pick from. */
+function ImageValue({ path, value, ctx }: { path: Path; value: string; ctx: FieldContext }) {
+  const info = value ? describeImage(ctx.images, value) : null;
+  const loadable = /^https?:\/\//.test(value);
+  return (
+    <div className="flex items-start gap-2">
+      <button type="button" title="从图库选图" onClick={() => ctx.pickImage(path)} className="shrink-0 active:!scale-100">
+        {loadable ? (
+          <img src={info!.thumb} alt="" className="h-[46px] w-[70px] rounded-[5px] bg-pill object-cover shadow-edge" />
+        ) : (
+          <span className="flex h-[46px] w-[70px] items-center justify-center rounded-[5px] bg-pill text-faint">
+            <ImageIcon className="h-4 w-4" />
+          </span>
+        )}
+      </button>
+      <div className="min-w-0 flex-1 space-y-0.5">
+        <TextValue value={value} placeholder="图片地址" onCommit={(v) => ctx.set(path, v === "" ? null : v)} />
+        <div className="flex items-center gap-1.5 text-[11.5px] text-muted">
+          <span className="min-w-0 truncate">{!value ? "未设置" : info?.id ? `图片库：${info.name}` : loadable ? "不在图片库" : "站内路径，无法预览"}</span>
+          <button type="button" onClick={() => ctx.pickImage(path)} className="flex shrink-0 items-center gap-1 rounded px-1 hover:bg-pill hover:text-fg">
+            <Images className="h-3 w-3" />
+            图库
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 /** The control for one plain value, by its type; an empty value is edited as text. */
 function Scalar({ path, value, ctx }: { path: Path; value: unknown; ctx: FieldContext }) {
   if (typeof value === "boolean") return <Switch checked={value} onChange={(on) => ctx.set(path, on)} label={String(path[path.length - 1])} />;
   if (typeof value === "number") return <NumberValue value={value} onCommit={(v) => ctx.set(path, v)} />;
+  if (typeof value === "string" && splitLink(value)) return <LinkValue value={value} onCommit={(v) => ctx.set(path, v)} />;
+  const inLibrary = typeof value === "string" && !!value && !!describeImage(ctx.images, value).id;
+  if (looksLikeImage(path[path.length - 1], value, inLibrary)) return <ImageValue path={path} value={typeof value === "string" ? value : ""} ctx={ctx} />;
   const text = value === null || value === undefined ? "" : value instanceof Date ? value.toISOString() : String(value);
   // An emptied value goes back to `key:` when it was empty, and stays an empty string when it was one.
   return <TextValue value={text} placeholder={value === null || value === undefined ? "空" : undefined} onCommit={(v) => ctx.set(path, v === "" && (value === null || value === undefined) ? null : v)} />;
@@ -114,6 +173,7 @@ export function Field({ path, value, def, ctx, inDefaultsOnly = false }: { path:
   const changed = theme && !onlyDefault && def !== undefined && !sameValue(value, def);
   const label = <Label path={path} hint={ctx.hints.get(key)} changed={changed} onlyDefault={onlyDefault} address={ctx.addressKeys.has(key)} />;
 
+  if (ctx.skip.has(key)) return null;
   if (ctx.hidden.has(key)) {
     return (
       <Row label={label}>
@@ -124,6 +184,8 @@ export function Field({ path, value, def, ctx, inDefaultsOnly = false }: { path:
       </Row>
     );
   }
+  if (isObject(shown) && !onlyDefault && linkMap(shown)) return <LinkMapField path={path} value={shown} def={def} ctx={ctx} label={label} />;
+  if (isObject(shown) && !onlyDefault && menuMap(shown)) return <MenuField path={path} value={shown} def={def} ctx={ctx} label={label} />;
   if (isObject(shown)) return <MapField path={path} value={isObject(value) ? value : undefined} def={def} ctx={ctx} label={label} />;
   if (Array.isArray(shown)) return <ListField path={path} value={Array.isArray(value) ? value : []} def={def} ctx={ctx} label={label} />;
   return (
@@ -245,10 +307,116 @@ function ListField({ path, value, def, ctx, label }: { path: Path; value: unknow
   );
 }
 
-function RemoveButton({ onClick }: { onClick: () => void }) {
+function RemoveButton({ onClick, title = "删除这一项" }: { onClick: () => void; title?: string }) {
   return (
-    <button type="button" aria-label="删除这一项" title="删除这一项" onClick={onClick} className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-faint hover:bg-pill hover:text-danger">
+    <button type="button" aria-label={title} title={title} onClick={onClick} className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-faint hover:bg-pill hover:text-danger">
       <X className="h-3.5 w-3.5" />
     </button>
+  );
+}
+
+// ---- maps of links: anzhiyu's menu and social icons -----------------------------------------
+
+/** Every value is text and at least one is a `link || icon`: names to links, which can be added, renamed and removed. */
+const linkMap = (v: Record<string, unknown>) => {
+  const values = Object.values(v);
+  return values.length > 0 && values.every((x) => typeof x === "string") && values.some((x) => splitLink(x as string));
+};
+/** Groups of link maps, as the menu is. */
+const menuMap = (v: Record<string, unknown>) => {
+  const values = Object.values(v);
+  return values.length > 0 && values.every((x) => isObject(x) && linkMap(x));
+};
+
+function freeName(taken: object, base: string): string {
+  let name = base;
+  for (let n = 2; name in taken; n++) name = `${base} ${n}`;
+  return name;
+}
+
+/** A key's name, edited in place; renaming keeps its place in the file. */
+function KeyName({ name, onRename, className }: { name: string; onRename: (v: string) => void; className?: string }) {
+  const [draft, setDraft] = useState(name);
+  useEffect(() => setDraft(name), [name]);
+  const commit = () => (draft.trim() && draft.trim() !== name ? onRename(draft.trim()) : setDraft(name));
+  return (
+    <input
+      value={draft}
+      aria-label="名称"
+      onChange={(e) => setDraft(e.target.value)}
+      onBlur={commit}
+      onKeyDown={(e) => (e.key === "Enter" && !e.nativeEvent.isComposing ? e.currentTarget.blur() : e.key === "Escape" && (setDraft(name), e.currentTarget.blur()))}
+      className={cn("h-7 w-full rounded-md bg-transparent px-1.5 text-[13px] outline-none hover:bg-pill focus:bg-card focus:shadow-[inset_0_0_0_1px_rgb(var(--brand))]", className)}
+    />
+  );
+}
+
+function LinkMapField({ path, value, def, ctx, label }: { path: Path; value: Record<string, unknown>; def: unknown; ctx: FieldContext; label: React.ReactNode }) {
+  const [open, setOpen] = useState(true);
+  const extra = isObject(def) ? Object.keys(def).filter((k) => !(k in value)) : [];
+  const body = (
+    <div className="space-y-1 py-1">
+      <div className="grid grid-cols-[minmax(110px,170px)_minmax(0,1fr)_24px] gap-1.5 px-0.5 text-[11px] text-muted">
+        <span className="px-1.5">名称</span>
+        <span>链接 · 图标</span>
+      </div>
+      {Object.entries(value).map(([k, v]) => (
+        <div key={k} className="grid grid-cols-[minmax(110px,170px)_minmax(0,1fr)_24px] items-start gap-1.5">
+          <KeyName name={k} onRename={(n) => ctx.renameKey([...path, k], n)} />
+          <LinkValue value={String(v ?? "")} onCommit={(nv) => ctx.set([...path, k], nv)} />
+          <RemoveButton onClick={() => ctx.removeKey([...path, k])} />
+        </div>
+      ))}
+      {extra.map((k) => (
+        <Field key={k} path={[...path, k]} value={undefined} def={at(def, k)} ctx={ctx} inDefaultsOnly />
+      ))}
+      <button type="button" onClick={() => ctx.set([...path, freeName(value, "新项目")], "/ ||")} className="flex h-7 items-center gap-1 rounded-md px-2 text-[12.5px] text-muted hover:bg-pill hover:text-fg">
+        <Plus className="h-3.5 w-3.5" />
+        添加一项
+      </button>
+    </div>
+  );
+  // A section of its own, or a menu group's card: listed as is; deeper ones fold.
+  if (path.length === 1 || label === null) return body;
+  return (
+    <Nested label={label} count={`${Object.keys(value).length} 项`} open={open} onToggle={() => setOpen((o) => !o)}>
+      {body}
+    </Nested>
+  );
+}
+
+function MenuField({ path, value, def, ctx, label }: { path: Path; value: Record<string, unknown>; def: unknown; ctx: FieldContext; label: React.ReactNode }) {
+  const [open, setOpen] = useState(true);
+  const extra = isObject(def) ? Object.keys(def).filter((k) => !(k in value)) : [];
+  const body = (
+    <div className="space-y-2 py-1">
+      {Object.entries(value).map(([group, links]) => (
+        <div key={group} className="rounded-lg bg-card-2 px-2.5 py-2 shadow-card">
+          <div className="mb-1 flex items-center gap-1">
+            <KeyName name={group} onRename={(n) => ctx.renameKey([...path, group], n)} className="font-medium" />
+            <span className="shrink-0 text-[11.5px] text-muted">{Object.keys(links as object).length} 项</span>
+            <RemoveButton onClick={() => ctx.removeKey([...path, group])} title="删除这个分组" />
+          </div>
+          <LinkMapField path={[...path, group]} value={links as Record<string, unknown>} def={at(def, group)} ctx={ctx} label={null} />
+        </div>
+      ))}
+      {extra.map((k) => (
+        <Field key={k} path={[...path, k]} value={undefined} def={at(def, k)} ctx={ctx} inDefaultsOnly />
+      ))}
+      <button
+        type="button"
+        onClick={() => ctx.set([...path, freeName(value, "新分组")], { 新项目: "/ ||" })}
+        className="flex h-7 items-center gap-1 rounded-md px-2 text-[12.5px] text-muted hover:bg-pill hover:text-fg"
+      >
+        <Plus className="h-3.5 w-3.5" />
+        添加分组
+      </button>
+    </div>
+  );
+  if (path.length === 1) return body;
+  return (
+    <Nested label={label} count={`${Object.keys(value).length} 组`} open={open} onToggle={() => setOpen((o) => !o)}>
+      {body}
+    </Nested>
   );
 }

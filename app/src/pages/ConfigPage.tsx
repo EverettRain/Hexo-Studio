@@ -1,16 +1,22 @@
 import { AlertTriangle, CheckCircle2, FolderSearch, Loader2, RotateCw, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Field, type FieldContext } from "@/components/ConfigFields";
+import { AsidePanel, CommentsPanel, SearchPanel } from "@/components/ConfigPanels";
+import { ImagePicker } from "@/components/ImagePicker";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
 import { useToast } from "@/components/ui/toast";
 import { api, errorText, type BlogStatus, type ConfigFile, type PreviewState } from "@/lib/api";
-import { appendItem, getIn, HEXO_CORE_KEYS, merge, outline, pathKey, readConfig, removeItem, sameValue, setValue, type Path } from "@/lib/configYaml";
+import { appendItem, getIn, HEXO_CORE_KEYS, merge, outline, pathKey, readConfig, removeItem, removeKey, renameKey, sameValue, setValue, type Path } from "@/lib/configYaml";
+import { indexImages, type ImageIndex } from "@/lib/images";
+import { SEARCH_PANEL, SEARCH_SERVICES, taskGroups } from "@/lib/themeGroups";
 import { useOnShow } from "@/lib/pageActive";
 import { cn } from "@/lib/utils";
 
 type View = "site" | "plugins" | "theme";
 type Editable = Exclude<ConfigFile, "themeDefaults">;
+/** How the theme's sections are listed: by what they are for, or by the theme file's own headers. */
+type ThemeOrder = "task" | "file";
 
 interface Loaded {
   path: string;
@@ -53,6 +59,9 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
   const [saving, setSaving] = useState<"idle" | "pending" | "saving" | "error">("idle");
   const [needsRestart, setNeedsRestart] = useState(false);
   const [restarting, setRestarting] = useState(false);
+  const [order, setOrder] = useState<ThemeOrder>("task");
+  const [images, setImages] = useState<ImageIndex>(new Map());
+  const [picking, setPicking] = useState<{ file: Editable; path: Path } | null>(null);
   const timers = useRef<Partial<Record<Editable, number>>>({});
   const latest = useRef(files);
   latest.current = files;
@@ -68,6 +77,8 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
       if (theme) next.theme = { path: theme.path, text: theme.text, fingerprint: theme.fingerprint };
       setFiles(next);
       setDefaults(themeDefaults?.exists ? themeDefaults.text : null);
+      // Thumbnails only: the page works without the library.
+      api.imageLibrary().then((l) => setImages(indexImages(l.images)), () => {});
       setError(null);
       if (!theme) setView((v) => (v === "theme" ? "site" : v));
     } catch (e) {
@@ -161,18 +172,23 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
     if (!info) return [];
     if (view === "theme") {
       const extra = Object.keys(themeDefaults ?? {}).filter((k) => !(k in data));
+      if (order === "task") return taskGroups([...Object.keys(data), ...extra]).map((g) => ({ title: g.title, keys: g.items }));
       return extra.length ? [...info.groups, { title: "仅在主题默认里", keys: extra }] : info.groups;
     }
     const keys = Object.keys(data).filter((k) => (view === "site") === HEXO_CORE_KEYS.has(k));
     return [{ title: "", keys }];
-  }, [info, view, data, themeDefaults]);
+  }, [info, view, data, themeDefaults, order]);
 
   const q = query.trim().toLowerCase();
+  const sectionText = (k: string) =>
+    k === SEARCH_PANEL
+      ? `搜索 search ${SEARCH_SERVICES.map((s) => searchText(s.key, data[s.key] ?? themeDefaults?.[s.key], hints)).join("\n")}`
+      : searchText(k, data[k] ?? themeDefaults?.[k], hints);
   const shownGroups = useMemo(
     () =>
       q
         ? groups
-            .map((g) => (g.title.toLowerCase().includes(q) ? g : { ...g, keys: g.keys.filter((k) => searchText(k, data[k] ?? themeDefaults?.[k], hints).includes(q)) }))
+            .map((g) => (g.title.toLowerCase().includes(q) ? g : { ...g, keys: g.keys.filter((k) => sectionText(k).includes(q)) }))
             .filter((g) => g.keys.length)
         : groups,
     [groups, q, data, themeDefaults, hints],
@@ -185,7 +201,13 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
     defaults: themeDefaults,
     hidden: view === "theme" ? new Set() : HIDDEN,
     addressKeys: view === "site" ? ADDRESS_KEYS : new Set(),
+    skip: new Set(),
+    images,
+    pickImage: (path) => setPicking({ file, path }),
     set: (path, value) => edit(file, (t) => setValue(t, path, value)),
+    setMany: (changes) => edit(file, (t) => changes.reduce((acc, [path, value]) => setValue(acc, path, value), t)),
+    renameKey: (path, name) => edit(file, (t) => renameKey(t, path, name)),
+    removeKey: (path) => edit(file, (t) => removeKey(t, path)),
     append: (path, value) => edit(file, (t) => appendItem(t, path, value)),
     remove: (path, index) => {
       const list = getIn(data, path) as unknown[];
@@ -215,7 +237,12 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
   if (!current) return null;
 
   const themeName = files.theme?.path.replace(/^_config\.|\.yml$/g, "");
-  const changedFromDefault = (k: string) => view === "theme" && themeDefaults !== undefined && k in data && k in themeDefaults && !sameValue(data[k], themeDefaults[k]);
+  const changedFromDefault = (k: string): boolean =>
+    k === SEARCH_PANEL
+      ? SEARCH_SERVICES.some((s) => changedFromDefault(s.key))
+      : view === "theme" && themeDefaults !== undefined && k in data && k in themeDefaults && !sameValue(data[k], themeDefaults[k]);
+  const sectionTitle = (k: string) => (k === SEARCH_PANEL ? "搜索" : k);
+  const panelProps = { data, defaults: themeDefaults ?? {}, ctx };
 
   return (
     <div className="flex h-full min-h-0 flex-col px-5 pb-5">
@@ -272,6 +299,17 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
       ) : (
         <div className="flex min-h-0 flex-1 gap-4">
           <aside className="flex w-[230px] shrink-0 flex-col gap-2">
+            {view === "theme" && (
+              <Segmented
+                value={order}
+                onChange={setOrder}
+                className="self-start"
+                options={[
+                  { value: "task", label: "按用途", title: "按要做的事分组" },
+                  { value: "file", label: "按文件", title: "按主题配置文件里原有的段落" },
+                ]}
+              />
+            )}
             <div className="relative shrink-0">
               <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
               <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索键名、说明、值" className="field h-8 pl-8 text-[12.5px]" />
@@ -282,7 +320,7 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
                 <div key={gi} className="pb-2">
                   {g.title && <div className="group-label truncate pt-1" title={g.title}>{g.title}</div>}
                   {g.keys.map((k) => {
-                    const hint = hints.get(pathKey([k]));
+                    const hint = k === SEARCH_PANEL ? "Algolia、本地搜索、DocSearch 三选一" : hints.get(pathKey([k]));
                     return (
                       <button
                         key={k}
@@ -293,7 +331,7 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
                         )}
                       >
                         <span className="min-w-0 flex-1">
-                          <span className="block truncate font-mono text-[12.5px]">{k}</span>
+                          <span className={cn("block truncate text-[12.5px]", k !== SEARCH_PANEL && "font-mono")}>{sectionTitle(k)}</span>
                           {hint && <span className="block truncate text-[11px] text-muted">{hint}</span>}
                         </span>
                         {changedFromDefault(k) && <span title="与主题默认值不同" className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />}
@@ -310,13 +348,21 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
               <div key={`${view}:${section}`} className="view-in">
                 <div className="mb-2 border-b-[0.5px] border-line-2 pb-3">
                   <div className="flex items-center gap-2">
-                    <h2 className="selectable font-mono text-[15px] font-semibold">{section}</h2>
+                    <h2 className={cn("selectable text-[15px] font-semibold", section !== SEARCH_PANEL && "font-mono")}>{sectionTitle(section)}</h2>
                     {changedFromDefault(section) && <span className="rounded bg-brand-soft px-1.5 text-[11px] text-brand">已改动</span>}
-                    {view === "theme" && !(section in data) && <span className="rounded bg-pill px-1.5 text-[11px] text-muted">仅在主题默认里，修改会写进 {files.theme?.path}</span>}
+                    {view === "theme" && section !== SEARCH_PANEL && !(section in data) && <span className="rounded bg-pill px-1.5 text-[11px] text-muted">仅在主题默认里，修改会写进 {files.theme?.path}</span>}
                   </div>
                   {hints.get(pathKey([section])) && <div className="mt-0.5 text-[12px] text-muted">{hints.get(pathKey([section]))}</div>}
                 </div>
-                <Field path={[section]} value={data[section]} def={themeDefaults?.[section]} ctx={ctx} />
+                {view === "theme" && section === SEARCH_PANEL ? (
+                  <SearchPanel {...panelProps} />
+                ) : view === "theme" && section === "comments" ? (
+                  <CommentsPanel {...panelProps} />
+                ) : view === "theme" && section === "aside" ? (
+                  <AsidePanel {...panelProps} />
+                ) : (
+                  <Field path={[section]} value={data[section]} def={themeDefaults?.[section]} ctx={ctx} />
+                )}
               </div>
             ) : (
               <div className="flex h-full items-center justify-center text-[13px] text-muted">选择左边的一项</div>
@@ -324,6 +370,16 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
           </section>
         </div>
       )}
+      <ImagePicker
+        open={picking !== null}
+        purpose="config"
+        postId={null}
+        onClose={() => setPicking(null)}
+        onPick={(img) => {
+          if (picking) edit(picking.file, (t) => setValue(t, picking.path, img.url));
+          setPicking(null);
+        }}
+      />
     </div>
   );
 }

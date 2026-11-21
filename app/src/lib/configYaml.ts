@@ -382,6 +382,58 @@ export function appendItem(text: string, path: Path, value: unknown): string {
   return checked(before, path, next, splice(text, { start: at, end: at, with: renderBlock([value], dash) }));
 }
 
+function checkedWhole(expected: unknown, out: string): string {
+  const result = parseDocument(out);
+  if (result.errors.length || !sameValue(result.toJS() ?? {}, expected)) throw new Error("无法在保留原有格式的前提下写入这一项。");
+  return out;
+}
+
+/** Removes the key at `path` with its value (and the lines it spans). */
+export function removeKey(text: string, path: Path): string {
+  const doc = parse(text);
+  const before = doc.toJS() ?? {};
+  const slot = find(doc, path);
+  if (!slot?.pair) throw new Error("找不到这一项");
+  const parent = getIn(before, path.slice(0, -1)) as Record<string, unknown>;
+  const rest = Object.fromEntries(Object.entries(parent).filter(([k]) => k !== path[path.length - 1]));
+  const expected = path.length > 1 ? setIn(before, path.slice(0, -1), rest) : rest;
+  if (slot.parent.flow || slot.parent.items.length === 1) {
+    if (path.length === 1) throw new Error("不能删除最后一项");
+    return setValue(text, path.slice(0, -1), rest);
+  }
+  const keyNode = slot.pair.key as Node;
+  const start = lineStart(text, keyNode.range![0]);
+  const end = lineEnd(text, slot.node?.range ? contentEnd(text, slot.node) : keyNode.range![1]);
+  return checkedWhole(expected, text.slice(0, start) + text.slice(Math.min(end + 1, text.length)));
+}
+
+/** Renames the key at `path`, keeping its place, its value and the text around it. */
+export function renameKey(text: string, path: Path, name: string): string {
+  const old = path[path.length - 1];
+  if (name === old) return text;
+  if (!name.trim()) throw new Error("名称不能为空");
+  const doc = parse(text);
+  const before = doc.toJS() ?? {};
+  const parent = getIn(before, path.slice(0, -1)) as Record<string, unknown>;
+  if (name in parent) throw new Error(`已经有一项叫「${name}」`);
+  const slot = find(doc, path);
+  if (!slot?.pair) throw new Error("找不到这一项");
+  const renamed = Object.fromEntries(Object.entries(parent).map(([k, v]) => [k === old ? name : k, v]));
+  const expected = path.length > 1 ? setIn(before, path.slice(0, -1), renamed) : renamed;
+  const keyNode = slot.pair.key as Node;
+  const rendered = new Document(name).toString({ lineWidth: 0 }).trimEnd();
+  return checkedWhole(expected, text.slice(0, keyNode.range![0]) + rendered + text.slice(keyNode.range![1]));
+}
+
+/** anzhiyu writes a link and its icon as one value: `/archives/ || anzhiyu-icon-box-archive`. */
+export function splitLink(value: string): { link: string; icon: string } | null {
+  const at = value.indexOf("||");
+  if (at < 0) return null;
+  return { link: value.slice(0, at).trim(), icon: value.slice(at + 2).trim() };
+}
+
+export const joinLink = (link: string, icon: string) => (icon.trim() ? `${link.trim()} || ${icon.trim()}` : link.trim());
+
 /** An empty item shaped like `like`: the same keys, blank values (for "add" on a list of objects). */
 export function blankLike(like: unknown): unknown {
   if (Array.isArray(like)) return [];
