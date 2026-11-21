@@ -28,7 +28,7 @@ function Field({ label, value, onChange, placeholder, presets }: { label: string
               key={p}
               type="button"
               onClick={() => onChange(value === p ? "" : p)}
-              className={cn("h-6 rounded-sm px-1.5 font-mono text-[11px] active:!scale-100", value === p ? "bg-fg text-card" : "text-muted hover:bg-pill hover:text-fg")}
+              className={cn("h-6 rounded-sm px-1.5 font-mono text-[11px] active:!scale-100", value === p ? "bg-primary text-primary-fg" : "text-muted hover:bg-pill hover:text-fg")}
             >
               {p.replace("px", "")}
             </button>
@@ -115,7 +115,7 @@ export function ImageStylePopover({ markup, info, anchor, onChange, onReplace, o
           移除
         </button>
         <span className="flex-1" />
-        <button type="button" onClick={onClose} className="h-7 rounded-md bg-fg px-3 text-[12.5px] font-medium text-card hover:bg-fg/85">
+        <button type="button" onClick={onClose} className="h-7 rounded-md bg-primary px-3 text-[12.5px] font-medium text-primary-fg hover:bg-primary/85">
           完成
         </button>
       </div>

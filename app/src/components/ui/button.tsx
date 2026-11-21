@@ -2,8 +2,8 @@ import * as React from "react";
 import { cn } from "@/lib/utils";
 
 const variants = {
-  /** Graphite primary: the one action that matters on a surface. */
-  default: "bg-fg text-card hover:bg-fg/85",
+  /** The one action that matters on a surface (graphite in the default theme). */
+  default: "bg-primary text-primary-fg hover:bg-primary/85",
   /** Indigo, for actions that change state outside the app (rare). */
   brand: "bg-brand text-brand-fg hover:bg-brand/90",
   destructive: "bg-danger text-white hover:bg-danger/90 dark:text-bg",

@@ -19,6 +19,7 @@ module.exports = {
         ok: { DEFAULT: token("ok"), soft: token("ok-soft") },
         danger: { DEFAULT: token("danger"), soft: token("danger-soft") },
         warn: { DEFAULT: token("warn"), soft: token("warn-soft") },
+        primary: { DEFAULT: token("primary"), fg: token("primary-fg") },
         raised: { DEFAULT: "var(--raised)", strong: "var(--raised-strong)" },
         scrim: "var(--scrim)",
       },

@@ -9,7 +9,10 @@ export interface Theme {
 }
 
 /** The interface's themes; each one's variables are in index.css under `[data-theme="<id>"]`. */
-export const THEMES: Theme[] = [{ id: "default", name: "默认", description: "圆角卡片、柔和阴影，石墨灰配靛蓝。" }];
+export const THEMES: Theme[] = [
+  { id: "default", name: "默认", description: "圆角卡片、柔和阴影，石墨灰配靛蓝。" },
+  { id: "vscode", name: "VS Code", description: "照 VS Code 的 Light / Dark Modern：扁平、细边框、小圆角，蓝色主按钮。" },
+];
 
 export const themeOf = (id: string): Theme => THEMES.find((t) => t.id === id) ?? THEMES[0];
 

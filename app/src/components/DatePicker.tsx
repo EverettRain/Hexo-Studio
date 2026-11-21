@@ -108,7 +108,7 @@ export function DatePicker({ value, onChange, timezone }: DatePickerProps) {
                   }}
                   className={cn(
                     "h-8 rounded-md text-[12.5px] tabular-nums active:!scale-100",
-                    picked ? "bg-fg font-medium text-card" : "hover:bg-pill",
+                    picked ? "bg-primary font-medium text-primary-fg" : "hover:bg-pill",
                     !picked && (d.inMonth ? "text-fg" : "text-faint"),
                     !picked && isToday && "font-semibold text-brand",
                   )}

@@ -313,7 +313,7 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
               onClick={() => setView(t.value)}
               className={cn(
                 "h-8 rounded-lg px-3.5 text-[13px] active:!scale-100",
-                view === t.value ? "bg-fg font-semibold text-card shadow-[0_1px_2px_rgba(0,0,0,0.12)]" : "text-fg-2 hover:bg-pill hover:text-fg",
+                view === t.value ? "bg-primary font-semibold text-primary-fg shadow-[0_1px_2px_rgba(0,0,0,0.12)]" : "text-fg-2 hover:bg-pill hover:text-fg",
               )}
             >
               {t.label}

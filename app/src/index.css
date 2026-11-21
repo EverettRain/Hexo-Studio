@@ -52,6 +52,12 @@
     --raised-strong: rgb(var(--card));
     /* Behind a dialog. */
     --scrim: rgb(0 0 0 / 0.2);
+    /* The one action that matters on a surface, and a chosen date / tab: graphite here. */
+    --primary: var(--fg);
+    --primary-fg: var(--card);
+    /* Text fields: their fill and what is around it. */
+    --field-fill: var(--pill);
+    --field-edge: none;
     color-scheme: light;
   }
 
@@ -84,6 +90,100 @@
     --raised: rgb(255 255 255 / 0.07);
     --raised-strong: rgb(255 255 255 / 0.1);
     --scrim: rgb(0 0 0 / 0.45);
+    color-scheme: dark;
+  }
+
+
+  /*
+   * VS Code style (Light Modern / Dark Modern): flat surfaces outlined by 1px borders instead of
+   * shadows, small corners, blue for the main action and the selection.
+   * Both blocks set the same variables, so neither leaks into the other.
+   */
+  [data-theme="vscode"] {
+    --bg: 248 248 248;
+    --card: 255 255 255;
+    --card-2: 248 248 248;
+    --pill: 242 242 242;
+    --pill-hover: 229 229 229;
+    --line: 229 229 229;
+    --line-2: 235 235 235;
+    --fg: 59 59 59;
+    --fg-2: 97 97 97;
+    --muted: 118 118 118;
+    --faint: 170 170 170;
+    --brand: 0 95 184;
+    --brand-soft: 225 236 248;
+    --brand-fg: 255 255 255;
+    --accent: 0 95 184;
+    --ok: 46 160 67;
+    --ok-soft: 230 245 233;
+    --danger: 205 49 49;
+    --danger-soft: 252 232 232;
+    --warn: 191 136 3;
+    --warn-soft: 250 242 220;
+    --primary: 0 95 184;
+    --primary-fg: 255 255 255;
+    --pop: rgba(255, 255, 255, 0.98);
+    --edge: none;
+    --card-edge: 0 0 0 1px rgb(var(--line));
+    --shadow: 0 0 0 1px rgb(200 200 200), 0 4px 16px rgba(0, 0, 0, 0.16);
+    --field-fill: 255 255 255;
+    --field-edge: inset 0 0 0 1px rgb(206 206 206);
+    --raised: rgb(228 230 241);
+    --raised-strong: rgb(var(--card));
+    --scrim: rgb(0 0 0 / 0.2);
+    --radius: 2px;
+    --radius-sm: 2px;
+    --radius-md: 2px;
+    --radius-control: 3px;
+    --radius-lg: 3px;
+    --radius-item: 3px;
+    --radius-xl: 4px;
+    --radius-2xl: 6px;
+    color-scheme: light;
+  }
+
+  [data-theme="vscode"].dark {
+    --bg: 24 24 24;
+    --card: 31 31 31;
+    --card-2: 27 27 27;
+    --pill: 49 49 49;
+    --pill-hover: 60 60 60;
+    --line: 43 43 43;
+    --line-2: 37 37 37;
+    --fg: 204 204 204;
+    --fg-2: 176 176 176;
+    --muted: 145 145 145;
+    --faint: 98 98 98;
+    --brand: 77 170 252;
+    --brand-soft: 4 57 94;
+    --brand-fg: 10 20 30;
+    --accent: 77 170 252;
+    --ok: 46 160 67;
+    --ok-soft: 22 48 30;
+    --danger: 248 81 73;
+    --danger-soft: 64 29 27;
+    --warn: 204 167 0;
+    --warn-soft: 56 48 14;
+    --primary: 0 120 212;
+    --primary-fg: 255 255 255;
+    --pop: rgba(32, 32, 32, 0.98);
+    --edge: none;
+    --card-edge: 0 0 0 1px rgb(var(--line));
+    --shadow: 0 0 0 1px rgb(69 69 69), 0 4px 16px rgba(0, 0, 0, 0.36);
+    --field-fill: 49 49 49;
+    --field-edge: inset 0 0 0 1px rgb(60 60 60);
+    --raised: rgb(55 55 61);
+    --raised-strong: rgb(var(--card));
+    --scrim: rgb(0 0 0 / 0.45);
+    --radius: 2px;
+    --radius-sm: 2px;
+    --radius-md: 2px;
+    --radius-control: 3px;
+    --radius-lg: 3px;
+    --radius-item: 3px;
+    --radius-xl: 4px;
+    --radius-2xl: 6px;
     color-scheme: dark;
   }
 
@@ -173,7 +273,9 @@
     @apply px-1 pb-1.5 text-[11px] font-medium uppercase tracking-[0.04em] text-muted;
   }
   .field {
-    @apply h-8 w-full rounded-md bg-pill px-2.5 text-[13px] text-fg outline-none;
+    @apply h-8 w-full rounded-md px-2.5 text-[13px] text-fg outline-none;
+    background-color: rgb(var(--field-fill));
+    box-shadow: var(--field-edge);
   }
   select.field {
     -webkit-appearance: none;
