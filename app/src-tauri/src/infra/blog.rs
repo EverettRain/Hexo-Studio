@@ -1,6 +1,7 @@
-//! The blog folder on disk: checking it, reading its config, listing, reading and writing posts.
+//! The blog folder on disk: checking it, reading its config, listing, reading and writing posts,
+//! and reading and writing the config files the config page edits.
 
-use crate::domain::config::{declares_hexo, BlogConfig};
+use crate::domain::config::{declares_hexo, BlogConfig, ConfigFile};
 use crate::domain::permalink;
 use crate::domain::post::{self, Meta};
 use serde::Serialize;
@@ -196,6 +197,57 @@ pub enum WriteOutcome {
     Conflict,
 }
 
+/// A config file as the config page reads it. A missing file reads as empty text, so the
+/// first change creates it.
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConfigText {
+    /// From the blog root.
+    pub path: String,
+    pub exists: bool,
+    pub text: String,
+    pub fingerprint: String,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase", tag = "status")]
+pub enum ConfigWrite {
+    Saved { fingerprint: String },
+    Conflict,
+}
+
+impl Blog {
+    fn config_file(&self, file: ConfigFile) -> Result<(String, PathBuf), String> {
+        let rel = file.path(self.config.theme.as_deref()).ok_or_else(|| "博客的 _config.yml 没有设置可用的 theme。".to_string())?;
+        let path = self.root.join(&rel);
+        Ok((rel, path))
+    }
+
+    pub fn read_config(&self, file: ConfigFile) -> Result<ConfigText, String> {
+        let (rel, path) = self.config_file(file)?;
+        let (exists, text) = match std::fs::read_to_string(&path) {
+            Ok(text) => (true, text),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => (false, String::new()),
+            Err(e) => return Err(format!("无法读取 {rel}：{e}")),
+        };
+        Ok(ConfigText { fingerprint: fingerprint(&text), path: rel, exists, text })
+    }
+
+    /// Writes a config file unless it no longer holds what `expected` names (edited elsewhere
+    /// since it was read). In place, as posts are; the theme's own defaults are never written.
+    pub fn write_config(&self, file: ConfigFile, text: &str, expected: &str) -> Result<ConfigWrite, String> {
+        if !file.writable() {
+            return Err("主题目录里的配置只读，改动写在博客根目录的 _config.<主题>.yml 里。".into());
+        }
+        let current = self.read_config(file)?;
+        if current.fingerprint != expected {
+            return Ok(ConfigWrite::Conflict);
+        }
+        std::fs::write(self.root.join(&current.path), text).map_err(|e| format!("无法保存 {}：{e}", current.path))?;
+        Ok(ConfigWrite::Saved { fingerprint: fingerprint(text) })
+    }
+}
+
 fn collect_markdown(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for e in entries.flatten() {
@@ -230,6 +282,70 @@ mod tests {
         std::fs::write(root.join("source/_drafts/d.md"), "---\ntitle: D\n---\n").unwrap();
         let blog = open(root).unwrap();
         (dir, blog)
+    }
+
+    fn themed_blog() -> (tempfile::TempDir, Blog) {
+        let (dir, _) = blog();
+        std::fs::write(dir.path().join("_config.yml"), "theme: anzhiyu\n").unwrap();
+        std::fs::create_dir_all(dir.path().join("themes/anzhiyu")).unwrap();
+        std::fs::write(dir.path().join("themes/anzhiyu/_config.yml"), "nav:\n  enable: true\n").unwrap();
+        let blog = open(dir.path()).unwrap();
+        (dir, blog)
+    }
+
+    #[test]
+    fn a_missing_theme_override_reads_empty_and_the_first_save_creates_it() {
+        // Arrange
+        let (dir, blog) = themed_blog();
+        let before = blog.read_config(ConfigFile::Theme).unwrap();
+
+        // Act
+        let r = blog.write_config(ConfigFile::Theme, "nav:\n  enable: false\n", &before.fingerprint).unwrap();
+
+        // Assert
+        assert_eq!((before.exists, before.text.as_str(), before.path.as_str()), (false, "", "_config.anzhiyu.yml"));
+        assert_eq!(r, ConfigWrite::Saved { fingerprint: fingerprint("nav:\n  enable: false\n") });
+        assert_eq!(std::fs::read_to_string(dir.path().join("_config.anzhiyu.yml")).unwrap(), "nav:\n  enable: false\n");
+    }
+
+    #[test]
+    fn a_config_changed_since_it_was_read_is_not_overwritten() {
+        // Arrange
+        let (dir, blog) = themed_blog();
+        let read = blog.read_config(ConfigFile::Site).unwrap();
+        std::fs::write(dir.path().join("_config.yml"), "theme: anzhiyu\ntitle: edited elsewhere\n").unwrap();
+
+        // Act
+        let r = blog.write_config(ConfigFile::Site, "theme: anzhiyu\ntitle: mine\n", &read.fingerprint).unwrap();
+
+        // Assert
+        assert_eq!(r, ConfigWrite::Conflict);
+        assert!(std::fs::read_to_string(dir.path().join("_config.yml")).unwrap().contains("edited elsewhere"));
+    }
+
+    #[test]
+    fn the_theme_defaults_are_read_only() {
+        // Arrange
+        let (dir, blog) = themed_blog();
+        let read = blog.read_config(ConfigFile::ThemeDefaults).unwrap();
+
+        // Act
+        let r = blog.write_config(ConfigFile::ThemeDefaults, "nav:\n  enable: false\n", &read.fingerprint);
+
+        // Assert
+        assert!(r.is_err());
+        assert_eq!(read.text, "nav:\n  enable: true\n");
+        assert_eq!(std::fs::read_to_string(dir.path().join("themes/anzhiyu/_config.yml")).unwrap(), "nav:\n  enable: true\n");
+    }
+
+    #[test]
+    fn without_a_theme_only_the_site_config_is_there() {
+        // Arrange
+        let (_dir, blog) = blog();
+
+        // Act / Assert
+        assert!(blog.read_config(ConfigFile::Site).unwrap().exists);
+        assert!(blog.read_config(ConfigFile::Theme).is_err());
     }
 
     #[test]

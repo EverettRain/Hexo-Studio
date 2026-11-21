@@ -1,0 +1,329 @@
+import { AlertTriangle, CheckCircle2, FolderSearch, Loader2, RotateCw, Search } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Field, type FieldContext } from "@/components/ConfigFields";
+import { Button } from "@/components/ui/button";
+import { Segmented } from "@/components/ui/segmented";
+import { useToast } from "@/components/ui/toast";
+import { api, errorText, type BlogStatus, type ConfigFile, type PreviewState } from "@/lib/api";
+import { appendItem, getIn, HEXO_CORE_KEYS, merge, outline, pathKey, readConfig, removeItem, sameValue, setValue, type Path } from "@/lib/configYaml";
+import { useOnShow } from "@/lib/pageActive";
+import { cn } from "@/lib/utils";
+
+type View = "site" | "plugins" | "theme";
+type Editable = Exclude<ConfigFile, "themeDefaults">;
+
+interface Loaded {
+  path: string;
+  /** What the page shows and edits; saved shortly after each change. */
+  text: string;
+  /** Of the text last read from or written to disk. */
+  fingerprint: string;
+}
+
+const SAVE_DELAY = 400;
+const HIDDEN = new Set([pathKey(["admin", "password_hash"]), pathKey(["admin", "secret"])]);
+const ADDRESS_KEYS = new Set(["url", "root", "permalink", "permalink_defaults", "pretty_urls", "timezone"].map((k) => pathKey([k])));
+
+/** Every key name, comment hint and text value under a section, lower-cased, for search. */
+function searchText(key: string, value: unknown, hints: Map<string, string>): string {
+  const parts: string[] = [key];
+  const walk = (v: unknown, p: Path) => {
+    const h = hints.get(pathKey(p));
+    if (h) parts.push(h);
+    if (v !== null && typeof v === "object" && !(v instanceof Date)) for (const [k, x] of Object.entries(v)) (parts.push(k), walk(x, [...p, Array.isArray(v) ? Number(k) : k]));
+    else if (typeof v === "string") parts.push(v);
+  };
+  walk(value, [key]);
+  return parts.join("\n").toLowerCase();
+}
+
+/**
+ * The blog's config: the site's `_config.yml` (Hexo's own keys, and the plugins' sections) and
+ * the theme's overrides, each value edited in place. The theme's defaults are read alongside to
+ * mark what differs from them and to offer keys only they have.
+ */
+export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onStatus: (s: BlogStatus) => void }) {
+  const toast = useToast();
+  const [files, setFiles] = useState<Partial<Record<Editable, Loaded>>>({});
+  const [defaults, setDefaults] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [view, setView] = useState<View>("theme");
+  const [selected, setSelected] = useState<Partial<Record<View, string>>>({});
+  const [query, setQuery] = useState("");
+  const [saving, setSaving] = useState<"idle" | "pending" | "saving" | "error">("idle");
+  const [needsRestart, setNeedsRestart] = useState(false);
+  const [restarting, setRestarting] = useState(false);
+  const timers = useRef<Partial<Record<Editable, number>>>({});
+  const latest = useRef(files);
+  latest.current = files;
+
+  const load = useCallback(async () => {
+    try {
+      const [site, theme, themeDefaults] = await Promise.all([
+        api.configRead("site"),
+        api.configRead("theme").catch(() => null),
+        api.configRead("themeDefaults").catch(() => null),
+      ]);
+      const next: Partial<Record<Editable, Loaded>> = { site: { path: site.path, text: site.text, fingerprint: site.fingerprint } };
+      if (theme) next.theme = { path: theme.path, text: theme.text, fingerprint: theme.fingerprint };
+      setFiles(next);
+      setDefaults(themeDefaults?.exists ? themeDefaults.text : null);
+      setError(null);
+      if (!theme) setView((v) => (v === "theme" ? "site" : v));
+    } catch (e) {
+      setError(errorText(e));
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+  // Back on the page: read again, unless a change is still on its way to disk.
+  useOnShow(() => {
+    if (!Object.values(timers.current).some(Boolean)) void load();
+  });
+
+  const save = useCallback(
+    async (file: Editable) => {
+      timers.current[file] = undefined;
+      const f = latest.current[file];
+      if (!f) return;
+      setSaving("saving");
+      try {
+        const r = await api.configWrite(file, f.text, f.fingerprint);
+        if (r.status === "conflict") {
+          toast(`${f.path} 在别处被改过，已重新读取；刚才的改动没有保存。`, "error");
+          await load();
+          setSaving("idle");
+          return;
+        }
+        setFiles((all) => ({ ...all, [file]: { ...all[file]!, fingerprint: r.fingerprint } }));
+        setSaving("idle");
+        setNeedsRestart(true);
+        // The rest of the app reads the site's title, addresses and time zone from it.
+        if (file === "site") void api.blogStatus().then(onStatus, () => {});
+      } catch (e) {
+        setSaving("error");
+        toast(errorText(e), "error");
+      }
+    },
+    [load, onStatus, toast],
+  );
+
+  const edit = useCallback(
+    (file: Editable, change: (text: string) => string) => {
+      const f = latest.current[file];
+      if (!f) return;
+      let text: string;
+      try {
+        text = change(f.text);
+      } catch (e) {
+        toast(errorText(e), "error");
+        return;
+      }
+      if (text === f.text) return;
+      const next = { ...latest.current, [file]: { ...f, text } };
+      latest.current = next;
+      setFiles(next);
+      setSaving("pending");
+      window.clearTimeout(timers.current[file]);
+      timers.current[file] = window.setTimeout(() => void save(file), SAVE_DELAY);
+    },
+    [save, toast],
+  );
+
+  // Changes still waiting when the page goes away are written at once.
+  useEffect(
+    () => () => {
+      for (const file of Object.keys(timers.current) as Editable[]) {
+        if (timers.current[file]) {
+          window.clearTimeout(timers.current[file]);
+          void save(file);
+        }
+      }
+    },
+    [save],
+  );
+
+  const file: Editable = view === "theme" ? "theme" : "site";
+  const current = files[file];
+  const parsed = useMemo(() => (current ? readConfig(current.text) : null), [current]);
+  const defaultsData = useMemo(() => (defaults ? readConfig(defaults).data : undefined), [defaults]);
+  const info = useMemo(() => (current ? outline(current.text) : null), [current]);
+  const defaultHints = useMemo(() => (defaults ? outline(defaults).hints : new Map<string, string>()), [defaults]);
+  const hints = useMemo(() => new Map([...defaultHints, ...(info?.hints ?? [])]), [defaultHints, info]);
+
+  const data = (parsed?.data ?? {}) as Record<string, unknown>;
+  const themeDefaults = view === "theme" ? ((defaultsData ?? {}) as Record<string, unknown>) : undefined;
+
+  // The sections of this view, under the file's own headers (the theme's) or as one list.
+  const groups = useMemo(() => {
+    if (!info) return [];
+    if (view === "theme") {
+      const extra = Object.keys(themeDefaults ?? {}).filter((k) => !(k in data));
+      return extra.length ? [...info.groups, { title: "仅在主题默认里", keys: extra }] : info.groups;
+    }
+    const keys = Object.keys(data).filter((k) => (view === "site") === HEXO_CORE_KEYS.has(k));
+    return [{ title: "", keys }];
+  }, [info, view, data, themeDefaults]);
+
+  const q = query.trim().toLowerCase();
+  const shownGroups = useMemo(
+    () =>
+      q
+        ? groups
+            .map((g) => (g.title.toLowerCase().includes(q) ? g : { ...g, keys: g.keys.filter((k) => searchText(k, data[k] ?? themeDefaults?.[k], hints).includes(q)) }))
+            .filter((g) => g.keys.length)
+        : groups,
+    [groups, q, data, themeDefaults, hints],
+  );
+  const allKeys = shownGroups.flatMap((g) => g.keys);
+  const section = selected[view] && allKeys.includes(selected[view]!) ? selected[view]! : allKeys[0];
+
+  const ctx: FieldContext = {
+    hints,
+    defaults: themeDefaults,
+    hidden: view === "theme" ? new Set() : HIDDEN,
+    addressKeys: view === "site" ? ADDRESS_KEYS : new Set(),
+    set: (path, value) => edit(file, (t) => setValue(t, path, value)),
+    append: (path, value) => edit(file, (t) => appendItem(t, path, value)),
+    remove: (path, index) => {
+      const list = getIn(data, path) as unknown[];
+      const item = list[index];
+      edit(file, (t) => removeItem(t, path, index));
+      const def = themeDefaults ? getIn(themeDefaults, path) : undefined;
+      if (Array.isArray(def) && (merge(def, list.filter((_, i) => i !== index)) as unknown[]).some((x) => sameValue(x, item))) {
+        toast("已从覆盖文件删除，但主题默认里也有这一项，Hexo 合并后它仍会出现。", "error");
+      }
+    },
+  };
+
+  const restart = async () => {
+    setRestarting(true);
+    try {
+      await api.previewRestart();
+      setNeedsRestart(false);
+      toast("预览服务器已重启，新配置已生效");
+    } catch (e) {
+      toast(errorText(e), "error");
+    } finally {
+      setRestarting(false);
+    }
+  };
+
+  if (error) return <div className="flex h-full items-center justify-center px-8 text-center text-[13px] text-fg-2">{error}</div>;
+  if (!current) return null;
+
+  const themeName = files.theme?.path.replace(/^_config\.|\.yml$/g, "");
+  const changedFromDefault = (k: string) => view === "theme" && themeDefaults !== undefined && k in data && k in themeDefaults && !sameValue(data[k], themeDefaults[k]);
+
+  return (
+    <div className="flex h-full min-h-0 flex-col px-5 pb-5">
+      <div className="flex shrink-0 items-center gap-2 pb-3 pt-1">
+        <Segmented
+          value={view}
+          onChange={setView}
+          options={[
+            { value: "site", label: "站点", title: "_config.yml 里 Hexo 自己的设置" },
+            { value: "plugins", label: "插件", title: "_config.yml 里各插件的设置" },
+            ...(files.theme ? [{ value: "theme" as const, label: `主题 · ${themeName}`, title: `${files.theme.path}（Hexo 把它合并到主题默认值上）` }] : []),
+          ]}
+        />
+        <span className="min-w-0 flex-1 truncate font-mono text-[11.5px] text-muted" title={current.path}>
+          {current.path}
+        </span>
+        <span className="flex shrink-0 items-center gap-1 text-[12px] text-muted">
+          {saving === "saving" || saving === "pending" ? (
+            <>
+              <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              保存中
+            </>
+          ) : saving === "error" ? (
+            <span className="text-danger">保存失败</span>
+          ) : (
+            <>
+              <CheckCircle2 className="h-3.5 w-3.5" />
+              已保存
+            </>
+          )}
+        </span>
+        <Button variant="ghost" size="icon" title="在 Finder 中显示博客文件夹" onClick={() => void api.revealProject().catch((e) => toast(errorText(e), "error"))}>
+          <FolderSearch />
+        </Button>
+      </div>
+
+      {needsRestart && preview.state === "running" && (
+        <div className="mb-3 flex shrink-0 items-center gap-2 rounded-lg bg-warn-soft px-3 py-2 text-[12.5px] text-warn">
+          <AlertTriangle className="h-4 w-4 shrink-0" />
+          <span className="flex-1">配置已保存。Hexo 只在启动时读取配置，预览服务器重启后才会生效。</span>
+          <Button size="sm" variant="outline" disabled={restarting} onClick={() => void restart()}>
+            {restarting ? <Loader2 className="animate-spin" /> : <RotateCw />}
+            重启预览
+          </Button>
+        </div>
+      )}
+
+      {parsed?.error ? (
+        <div className="flex flex-1 flex-col items-center justify-center gap-2 px-8 text-center text-[13px] text-fg-2">
+          <div className="text-danger">{current.path} 不是有效的 YAML，无法按项编辑：</div>
+          <div className="selectable font-mono text-[12px]">{parsed.error}</div>
+          <div className="text-muted">请在编辑器里修好后回到这里。</div>
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1 gap-4">
+          <aside className="flex w-[230px] shrink-0 flex-col gap-2">
+            <div className="relative shrink-0">
+              <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted" />
+              <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索键名、说明、值" className="field h-8 pl-8 text-[12.5px]" />
+            </div>
+            <nav className="min-h-0 flex-1 overflow-y-auto pb-2">
+              {shownGroups.length === 0 && <div className="px-2 py-3 text-[12.5px] text-muted">{q ? "没有匹配的设置" : "这里没有设置"}</div>}
+              {shownGroups.map((g, gi) => (
+                <div key={gi} className="pb-2">
+                  {g.title && <div className="group-label truncate pt-1" title={g.title}>{g.title}</div>}
+                  {g.keys.map((k) => {
+                    const hint = hints.get(pathKey([k]));
+                    return (
+                      <button
+                        key={k}
+                        onClick={() => setSelected((s) => ({ ...s, [view]: k }))}
+                        className={cn(
+                          "flex w-full items-center gap-1.5 rounded-[7px] px-2 py-1 text-left active:!scale-100",
+                          k === section ? "bg-card shadow-edge dark:bg-white/[.07]" : "hover:bg-pill",
+                        )}
+                      >
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate font-mono text-[12.5px]">{k}</span>
+                          {hint && <span className="block truncate text-[11px] text-muted">{hint}</span>}
+                        </span>
+                        {changedFromDefault(k) && <span title="与主题默认值不同" className="h-1.5 w-1.5 shrink-0 rounded-full bg-brand" />}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </nav>
+          </aside>
+
+          <section className="list-card min-h-0 min-w-0 flex-1 overflow-y-auto px-5 py-4">
+            {section ? (
+              <div key={`${view}:${section}`} className="view-in">
+                <div className="mb-2 border-b-[0.5px] border-line-2 pb-3">
+                  <div className="flex items-center gap-2">
+                    <h2 className="selectable font-mono text-[15px] font-semibold">{section}</h2>
+                    {changedFromDefault(section) && <span className="rounded bg-brand-soft px-1.5 text-[11px] text-brand">已改动</span>}
+                    {view === "theme" && !(section in data) && <span className="rounded bg-pill px-1.5 text-[11px] text-muted">仅在主题默认里，修改会写进 {files.theme?.path}</span>}
+                  </div>
+                  {hints.get(pathKey([section])) && <div className="mt-0.5 text-[12px] text-muted">{hints.get(pathKey([section]))}</div>}
+                </div>
+                <Field path={[section]} value={data[section]} def={themeDefaults?.[section]} ctx={ctx} />
+              </div>
+            ) : (
+              <div className="flex h-full items-center justify-center text-[13px] text-muted">选择左边的一项</div>
+            )}
+          </section>
+        </div>
+      )}
+    </div>
+  );
+}

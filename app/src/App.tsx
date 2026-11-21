@@ -6,6 +6,7 @@ import { useToast } from "@/components/ui/toast";
 import { api, errorText, onEvent, type AppInfo, type BlogStatus, type PostSummary, type PreviewState } from "@/lib/api";
 import { PageSlot } from "@/lib/pageActive";
 import { useTheme } from "@/lib/theme";
+import { ConfigPage } from "@/pages/ConfigPage";
 import { DeployPage } from "@/pages/DeployPage";
 import { EditorPage } from "@/pages/EditorPage";
 import { ImagesPage } from "@/pages/ImagesPage";
@@ -16,7 +17,7 @@ import { SourcePage } from "@/pages/SourcePage";
 import { WelcomePage } from "@/pages/WelcomePage";
 import { Plus } from "lucide-react";
 
-const titles: Record<PageId, string> = { posts: "文章", images: "图片", preview: "预览", source: "源码", deploy: "部署", settings: "设置" };
+const titles: Record<PageId, string> = { posts: "文章", images: "图片", config: "配置", preview: "预览", source: "源码", deploy: "部署", settings: "设置" };
 
 /** The welcome page until a project is open, then the project's window. */
 export default function App() {
@@ -160,6 +161,9 @@ function ProjectWindow({ status, info, theme, onThemeChange, onStatus, onClose }
       </PageSlot>
       <PageSlot active={page === "images"}>
         <ImagesPage onOpenPost={(id) => void openPost(id)} />
+      </PageSlot>
+      <PageSlot active={page === "config"}>
+        <ConfigPage preview={preview} onStatus={onStatus} />
       </PageSlot>
       <PageSlot active={page === "preview"}>
         <PreviewPage preview={preview} />

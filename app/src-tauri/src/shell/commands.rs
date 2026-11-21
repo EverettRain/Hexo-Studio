@@ -1,13 +1,13 @@
 //! Tauri commands the interface calls.
 
 use crate::domain::catalog::{self, ChecklistRow, Image, Mirror};
-use crate::domain::config::Deployer;
+use crate::domain::config::{ConfigFile, Deployer};
 use crate::domain::image_key::Format;
 use crate::domain::permalink;
 use crate::domain::source::{Commit, CommitDetail, Status as SourceStatus};
 use crate::domain::storage::Storage;
 use crate::domain::task::Task;
-use crate::infra::blog::{self, Blog, PostFile, PostSummary, WriteOutcome};
+use crate::infra::blog::{self, Blog, ConfigText, ConfigWrite, PostFile, PostSummary, WriteOutcome};
 use crate::infra::node_env::{self, NodeEnv};
 use crate::infra::project::{Profile, ProjectSettings, UploadSettings};
 use crate::infra::store::Store;
@@ -308,6 +308,21 @@ pub async fn preview_start(ws: Ws<'_>, preview: Prev<'_>, runner: Run<'_>) -> Re
     blocking(move || preview.start(&blog, &current_node()?)).await
 }
 
+/// Stops and starts the server again: Hexo reads its config files only when it starts.
+#[tauri::command]
+pub async fn preview_restart(ws: Ws<'_>, preview: Prev<'_>, runner: Run<'_>) -> Result<u16, String> {
+    if runner.holds_site() {
+        return Err("正在执行清理 / 生成 / 部署，预览服务器会在它结束后自动恢复。".into());
+    }
+    let blog = current_blog(&ws)?;
+    let preview = preview.inner().clone();
+    blocking(move || {
+        preview.stop();
+        preview.start(&blog, &current_node()?)
+    })
+    .await
+}
+
 #[tauri::command]
 pub async fn preview_stop(preview: Prev<'_>) -> Result<(), String> {
     let preview = preview.inner().clone();
@@ -361,6 +376,21 @@ pub async fn preview_await_change(preview: Prev<'_>, path: String, before: Optio
 pub async fn blog_git_changes(ws: Ws<'_>) -> Result<Option<usize>, String> {
     let blog = current_blog(&ws)?;
     blocking(move || Ok(git::uncommitted(&blog.root, &current_node()?))).await
+}
+
+// ---- config -------------------------------------------------------------------------------
+
+#[tauri::command]
+pub async fn config_read(ws: Ws<'_>, file: ConfigFile) -> Result<ConfigText, String> {
+    let blog = current_blog(&ws)?;
+    blocking(move || blog.read_config(file)).await
+}
+
+/// Writes a config file unless it changed on disk since `expected` was read.
+#[tauri::command]
+pub async fn config_write(ws: Ws<'_>, file: ConfigFile, text: String, expected: String) -> Result<ConfigWrite, String> {
+    let blog = current_blog(&ws)?;
+    blocking(move || blog.write_config(file, &text, &expected)).await
 }
 
 // ---- source repository --------------------------------------------------------------------

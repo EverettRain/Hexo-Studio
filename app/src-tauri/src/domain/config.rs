@@ -1,5 +1,6 @@
-//! The parts of a blog's `_config.yml` the app reads. Never written back.
+//! The parts of a blog's `_config.yml` the app reads, and the config files the config page edits.
 
+use serde::{Deserialize, Serialize};
 use yaml_rust2::{Yaml, YamlLoader};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -21,6 +22,8 @@ pub struct BlogConfig {
     pub new_post_name: String,
     pub source_dir: String,
     pub deploy: Vec<Deployer>,
+    /// The `theme` folder name under `themes/`; `None` when not set.
+    pub theme: Option<String>,
 }
 
 impl Default for BlogConfig {
@@ -35,6 +38,7 @@ impl Default for BlogConfig {
             new_post_name: ":title.md".into(),
             source_dir: "source".into(),
             deploy: Vec::new(),
+            theme: None,
         }
     }
 }
@@ -80,7 +84,39 @@ impl BlogConfig {
             new_post_name: text(&y["new_post_name"]).unwrap_or(defaults.new_post_name),
             source_dir: text(&y["source_dir"]).unwrap_or(defaults.source_dir),
             deploy,
+            theme: text(&y["theme"]),
         })
+    }
+}
+
+/// A config file the config page reads: the site's, the theme's overrides
+/// (`_config.<theme>.yml`, which Hexo merges over the theme's own), and the theme's defaults.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ConfigFile {
+    Site,
+    Theme,
+    /// Read only: shown for comparison; the theme folder is never written.
+    ThemeDefaults,
+}
+
+/// A theme name that stays a single folder name inside `themes/`.
+fn plain_name(theme: Option<&str>) -> Option<&str> {
+    theme.filter(|t| !t.is_empty() && !t.starts_with('.') && !t.contains(['/', '\\']))
+}
+
+impl ConfigFile {
+    /// Path from the blog root; `None` for the theme's files when the blog names no usable theme.
+    pub fn path(self, theme: Option<&str>) -> Option<String> {
+        match self {
+            ConfigFile::Site => Some("_config.yml".into()),
+            ConfigFile::Theme => plain_name(theme).map(|t| format!("_config.{t}.yml")),
+            ConfigFile::ThemeDefaults => plain_name(theme).map(|t| format!("themes/{t}/_config.yml")),
+        }
+    }
+
+    pub fn writable(self) -> bool {
+        self != ConfigFile::ThemeDefaults
     }
 }
 
@@ -95,11 +131,33 @@ mod tests {
     use super::*;
 
     #[test]
+    fn config_files_are_named_after_the_theme() {
+        // Act
+        let theme = Some("anzhiyu");
+
+        // Assert
+        assert_eq!(ConfigFile::Site.path(theme).as_deref(), Some("_config.yml"));
+        assert_eq!(ConfigFile::Theme.path(theme).as_deref(), Some("_config.anzhiyu.yml"));
+        assert_eq!(ConfigFile::ThemeDefaults.path(theme).as_deref(), Some("themes/anzhiyu/_config.yml"));
+        assert!(ConfigFile::Theme.writable() && !ConfigFile::ThemeDefaults.writable());
+    }
+
+    #[test]
+    fn a_theme_name_that_leaves_its_folder_has_no_files() {
+        // Act / Assert
+        for bad in [None, Some(""), Some("../x"), Some("a/b"), Some(".."), Some(".hidden")] {
+            assert_eq!(ConfigFile::Theme.path(bad), None, "{bad:?}");
+            assert_eq!(ConfigFile::ThemeDefaults.path(bad), None, "{bad:?}");
+        }
+        assert_eq!(ConfigFile::Site.path(None).as_deref(), Some("_config.yml"));
+    }
+
+    #[test]
     fn reads_the_keys_the_app_uses() {
         // Arrange
         let source =
             "title: Everett Rain\nurl: https://blog.example.cn/\npermalink: :year/:month/:day/:title/\ntimezone: 'Asia/Shanghai'\n\
-                      new_post_name: :title.md # comment\nsource_dir: source\n\
+                      new_post_name: :title.md # comment\nsource_dir: source\ntheme: anzhiyu\n\
                       deploy:\n  type: git\n  repo: git@github.com:a/b.git\n  branch: main\n";
 
         // Act
@@ -117,6 +175,7 @@ mod tests {
                 new_post_name: ":title.md".into(),
                 source_dir: "source".into(),
                 deploy: vec![Deployer { kind: "git".into(), repo: Some("git@github.com:a/b.git".into()), branch: Some("main".into()) }],
+                theme: Some("anzhiyu".into()),
             }
         );
     }

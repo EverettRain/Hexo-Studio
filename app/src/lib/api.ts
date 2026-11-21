@@ -97,6 +97,20 @@ export interface PageProbe {
   hash: string;
 }
 
+/** The site's `_config.yml`, the theme's overrides `_config.<theme>.yml`, the theme's own defaults (read only). */
+export type ConfigFile = "site" | "theme" | "themeDefaults";
+
+export interface ConfigText {
+  /** From the blog root. */
+  path: string;
+  /** A missing file reads as empty text; the first save creates it. */
+  exists: boolean;
+  text: string;
+  fingerprint: string;
+}
+
+export type ConfigWrite = { status: "saved"; fingerprint: string } | { status: "conflict" };
+
 export type ChangeKind = "added" | "modified" | "deleted" | "renamed" | "untracked" | "conflicted";
 
 export interface SourceChange {
@@ -328,12 +342,16 @@ export const api = {
   revealPost: (id: string) => invoke<void>("reveal_post", { id }),
   openPostExternally: (id: string) => invoke<void>("open_post_externally", { id }),
   previewStart: () => invoke<number>("preview_start"),
+  /** Hexo reads its config only when it starts. */
+  previewRestart: () => invoke<number>("preview_restart"),
   previewStop: () => invoke<void>("preview_stop"),
   previewState: () => invoke<PreviewState>("preview_state"),
   previewLog: () => invoke<LogLine[]>("preview_log"),
   previewProbe: (path: string) => invoke<PageProbe>("preview_probe", { path }),
   previewAwaitChange: (path: string, before: PageProbe | null) => invoke<PageProbe>("preview_await_change", { path, before }),
   blogGitChanges: () => invoke<number | null>("blog_git_changes"),
+  configRead: (file: ConfigFile) => invoke<ConfigText>("config_read", { file }),
+  configWrite: (file: ConfigFile, text: string, expected: string) => invoke<ConfigWrite>("config_write", { file, text, expected }),
   sourceStatus: () => invoke<SourceStatus>("source_status"),
   /** One page of the history, newest first, after the `skip` commits already loaded. */
   sourceCommits: (skip: number) => invoke<SourceCommit[]>("source_commits", { skip }),
