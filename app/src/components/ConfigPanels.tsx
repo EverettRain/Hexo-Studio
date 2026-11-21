@@ -1,8 +1,10 @@
-import { Info } from "lucide-react";
+import { ExternalLink, Info, TriangleAlert } from "lucide-react";
 import { Field, type FieldContext } from "@/components/ConfigFields";
 import { Segmented } from "@/components/ui/segmented";
 import { Switch } from "@/components/ui/switch";
+import { api, errorText } from "@/lib/api";
 import { getIn, pathKey, type Path } from "@/lib/configYaml";
+import type { PluginView } from "@/lib/plugins";
 import { ASIDE_CARDS, COMMENT_SERVICES, commentServices, SEARCH_SERVICES, writeCommentServices } from "@/lib/themeGroups";
 import { cn } from "@/lib/utils";
 
@@ -136,6 +138,53 @@ export function AsidePanel({ data, defaults, ctx }: PanelProps) {
       <Note>卡片的先后顺序由主题模板决定，配置里改不了（各卡片的 sort_order 主题没有用到）。</Note>
       <PanelHeader title="侧栏与各卡片设置" />
       <Field path={["aside"]} value={data.aside} def={defaults.aside} ctx={skipping(ctx, cards.map((k) => ["aside", k, "enable"]))} />
+    </div>
+  );
+}
+
+function LinkButton({ url, label, onError }: { url: string; label: string; onError: (message: string) => void }) {
+  return (
+    <button type="button" onClick={() => void api.openUrl(url).catch((e) => onError(errorText(e)))} className="flex items-center gap-1 rounded px-1.5 text-accent hover:bg-pill">
+      <ExternalLink className="h-3 w-3" />
+      {label}
+    </button>
+  );
+}
+
+/** A plugin: what is installed, where to read about it, and its sections of `_config.yml`. */
+export function PluginPanel({ view, data, ctx, onError }: { view: PluginView; data: Record<string, unknown>; ctx: FieldContext; onError: (message: string) => void }) {
+  const { plugin, keys } = view;
+  return (
+    <div>
+      <div className="flex flex-wrap items-center gap-x-2 gap-y-1 pb-2 text-[12px] text-muted">
+        {plugin.version ? (
+          <span>
+            已安装 <span className="font-mono text-fg-2">{plugin.version}</span>
+          </span>
+        ) : (
+          <span className="flex items-center gap-1 rounded bg-warn-soft px-1.5 text-warn">
+            <TriangleAlert className="h-3 w-3" />
+            没有安装，Hexo 会跳过它：在博客目录执行 npm install
+          </span>
+        )}
+        <span>
+          package.json 要求 <span className="font-mono text-fg-2">{plugin.wanted || "任意版本"}</span>
+        </span>
+        {plugin.fromTheme && <span className="rounded bg-pill px-1.5">主题依赖</span>}
+        <span className="flex-1" />
+        <LinkButton url={`https://www.npmjs.com/package/${plugin.name}`} label="npm" onError={onError} />
+        {plugin.repo && <LinkButton url={plugin.repo} label="GitHub" onError={onError} />}
+      </div>
+      {keys.length === 0 ? (
+        <Note>_config.yml 里没有这个插件的设置，它按自己的默认值工作。需要改的话，照它的说明在 _config.yml 里加上对应的段，加好后会出现在这里。</Note>
+      ) : (
+        keys.map((k, i) => (
+          <div key={k}>
+            <PanelHeader title={k} top={i === 0} />
+            <Field path={[k]} value={data[k]} def={undefined} ctx={ctx} />
+          </div>
+        ))
+      )}
     </div>
   );
 }

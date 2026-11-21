@@ -3,6 +3,7 @@
 
 use crate::domain::config::{declares_hexo, BlogConfig, ConfigFile};
 use crate::domain::permalink;
+use crate::domain::plugins::{self, Plugin};
 use crate::domain::post::{self, Meta};
 use serde::Serialize;
 use std::hash::{Hash, Hasher};
@@ -248,6 +249,41 @@ impl Blog {
     }
 }
 
+impl Blog {
+    /// The plugins Hexo loads for this blog: the blog's own, then the theme's not already listed;
+    /// each in name order.
+    pub fn plugins(&self) -> Vec<Plugin> {
+        let read = |p: PathBuf| std::fs::read_to_string(p).unwrap_or_default();
+        let theme_dir = self.config.theme.as_deref().and_then(|t| ConfigFile::ThemeDefaults.path(Some(t))).map(|p| self.root.join(p).with_file_name(""));
+        let mut out: Vec<Plugin> = Vec::new();
+        let mut add = |name: String, wanted: String, dirs: &[PathBuf], from_theme: bool| {
+            if out.iter().any(|p| p.name == name) {
+                return;
+            }
+            // As Node resolves it: the nearest `node_modules` holding the package.
+            let manifest = dirs.iter().map(|d| d.join("node_modules").join(&name).join("package.json")).find(|p| p.is_file());
+            let json: serde_json::Value = manifest.map(|p| serde_json::from_str(&read(p)).unwrap_or_default()).unwrap_or_default();
+            out.push(Plugin {
+                version: json["version"].as_str().map(str::to_string),
+                description: json["description"].as_str().map(|d| d.trim().to_string()).filter(|d| !d.is_empty()),
+                repo: plugins::github_page(&json),
+                name,
+                wanted,
+                from_theme,
+            });
+        };
+        for (name, wanted) in plugins::listed(&read(self.root.join("package.json")), true) {
+            add(name, wanted, std::slice::from_ref(&self.root), false);
+        }
+        if let Some(dir) = theme_dir {
+            for (name, wanted) in plugins::listed(&read(dir.join("package.json")), false) {
+                add(name, wanted, &[dir.clone(), self.root.clone()], true);
+            }
+        }
+        out
+    }
+}
+
 fn collect_markdown(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for e in entries.flatten() {
@@ -346,6 +382,36 @@ mod tests {
         // Act / Assert
         assert!(blog.read_config(ConfigFile::Site).unwrap().exists);
         assert!(blog.read_config(ConfigFile::Theme).is_err());
+    }
+
+    #[test]
+    fn lists_the_plugins_hexo_loads_with_what_is_installed() {
+        // Arrange
+        let (dir, _) = themed_blog();
+        let root = dir.path();
+        std::fs::write(root.join("package.json"), r#"{"dependencies":{"hexo":"^7.0.0","hexo-server":"^3.0.0","hexo-missing":"^1","twikoo":"1"}}"#).unwrap();
+        std::fs::write(root.join("themes/anzhiyu/package.json"), r#"{"dependencies":{"hexo-server":"^2","hexo-renderer-pug":"^3"}}"#).unwrap();
+        for (name, manifest) in [
+            ("hexo-server", r#"{"version":"3.0.0","description":"Server module of Hexo.","repository":"hexojs/hexo-server"}"#),
+            ("hexo-renderer-pug", r#"{"version":"3.1.0","homepage":"https://hexo.io/"}"#),
+        ] {
+            std::fs::create_dir_all(root.join("node_modules").join(name)).unwrap();
+            std::fs::write(root.join("node_modules").join(name).join("package.json"), manifest).unwrap();
+        }
+        let blog = open(root).unwrap();
+
+        // Act
+        let list = blog.plugins();
+
+        // Assert
+        let rows: Vec<_> = list.iter().map(|p| (p.name.as_str(), p.wanted.as_str(), p.version.as_deref(), p.from_theme)).collect();
+        assert_eq!(
+            rows,
+            vec![("hexo-missing", "^1", None, false), ("hexo-server", "^3.0.0", Some("3.0.0"), false), ("hexo-renderer-pug", "^3", Some("3.1.0"), true)]
+        );
+        assert_eq!(list[1].repo.as_deref(), Some("https://github.com/hexojs/hexo-server"));
+        assert_eq!(list[1].description.as_deref(), Some("Server module of Hexo."));
+        assert_eq!(list[2].repo, None);
     }
 
     #[test]

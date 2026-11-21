@@ -386,6 +386,13 @@ pub async fn config_read(ws: Ws<'_>, file: ConfigFile) -> Result<ConfigText, Str
     blocking(move || blog.read_config(file)).await
 }
 
+/// The Hexo plugins the blog installs, as Hexo picks them from `package.json`.
+#[tauri::command]
+pub async fn list_plugins(ws: Ws<'_>) -> Result<Vec<crate::domain::plugins::Plugin>, String> {
+    let blog = current_blog(&ws)?;
+    blocking(move || Ok(blog.plugins())).await
+}
+
 /// Writes a config file unless it changed on disk since `expected` was read.
 #[tauri::command]
 pub async fn config_write(ws: Ws<'_>, file: ConfigFile, text: String, expected: String) -> Result<ConfigWrite, String> {
@@ -481,10 +488,11 @@ pub fn list_runs(runner: Run<'_>) -> Vec<RunRecord> {
     runner.runs()
 }
 
-/// Opens a link in the browser: GitHub pages (push protection's unblock links) and the preview.
+/// Opens a link in the browser: GitHub pages (push protection's unblock links, plugins' sources),
+/// plugins' npm pages and the preview.
 #[tauri::command]
 pub fn open_url(app: AppHandle, url: String) -> Result<(), String> {
-    if !(url.starts_with("https://github.com/") || url.starts_with("http://127.0.0.1:")) {
+    if !(url.starts_with("https://github.com/") || url.starts_with("https://www.npmjs.com/package/") || url.starts_with("http://127.0.0.1:")) {
         return Err(format!("不打开这个地址：{url}"));
     }
     app.opener().open_url(url, None::<&str>).map_err(|e| e.to_string())

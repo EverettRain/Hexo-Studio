@@ -1,14 +1,15 @@
 import { AlertTriangle, CheckCircle2, FolderSearch, Loader2, RotateCw, Search } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Field, type FieldContext } from "@/components/ConfigFields";
-import { AsidePanel, CommentsPanel, SearchPanel } from "@/components/ConfigPanels";
+import { AsidePanel, CommentsPanel, PluginPanel, SearchPanel } from "@/components/ConfigPanels";
 import { ImagePicker } from "@/components/ImagePicker";
 import { Button } from "@/components/ui/button";
 import { Segmented } from "@/components/ui/segmented";
 import { useToast } from "@/components/ui/toast";
-import { api, errorText, type BlogStatus, type ConfigFile, type PreviewState } from "@/lib/api";
+import { api, errorText, type BlogStatus, type ConfigFile, type Plugin, type PreviewState } from "@/lib/api";
 import { appendItem, getIn, HEXO_CORE_KEYS, merge, outline, pathKey, readConfig, removeItem, removeKey, renameKey, sameValue, setValue, type Path } from "@/lib/configYaml";
 import { indexImages, type ImageIndex } from "@/lib/images";
+import { pluginSections } from "@/lib/plugins";
 import { SEARCH_PANEL, SEARCH_SERVICES, taskGroups } from "@/lib/themeGroups";
 import { useOnShow } from "@/lib/pageActive";
 import { cn } from "@/lib/utils";
@@ -61,6 +62,7 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
   const [restarting, setRestarting] = useState(false);
   const [order, setOrder] = useState<ThemeOrder>("task");
   const [images, setImages] = useState<ImageIndex>(new Map());
+  const [plugins, setPlugins] = useState<Plugin[]>([]);
   const [picking, setPicking] = useState<{ file: Editable; path: Path } | null>(null);
   const timers = useRef<Partial<Record<Editable, number>>>({});
   const latest = useRef(files);
@@ -79,6 +81,7 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
       setDefaults(themeDefaults?.exists ? themeDefaults.text : null);
       // Thumbnails only: the page works without the library.
       api.imageLibrary().then((l) => setImages(indexImages(l.images)), () => {});
+      api.listPlugins().then(setPlugins, () => {});
       setError(null);
       if (!theme) setView((v) => (v === "theme" ? "site" : v));
     } catch (e) {
@@ -167,6 +170,11 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
   const data = (parsed?.data ?? {}) as Record<string, unknown>;
   const themeDefaults = view === "theme" ? ((defaultsData ?? {}) as Record<string, unknown>) : undefined;
 
+  // In the plugins view, items are plugins by package name, and keys no plugin claims.
+  const sections = useMemo(() => pluginSections(Object.keys(data), plugins), [data, plugins]);
+  const pluginViews = sections.plugins;
+  const pluginView = (k: string) => pluginViews.find((v) => v.plugin.name === k);
+
   // The sections of this view, under the file's own headers (the theme's) or as one list.
   const groups = useMemo(() => {
     if (!info) return [];
@@ -175,15 +183,25 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
       if (order === "task") return taskGroups([...Object.keys(data), ...extra]).map((g) => ({ title: g.title, keys: g.items }));
       return extra.length ? [...info.groups, { title: "仅在主题默认里", keys: extra }] : info.groups;
     }
-    const keys = Object.keys(data).filter((k) => (view === "site") === HEXO_CORE_KEYS.has(k));
-    return [{ title: "", keys }];
-  }, [info, view, data, themeDefaults, order]);
+    if (view === "plugins") {
+      const withKeys = pluginViews.filter((v) => v.keys.length).map((v) => v.plugin.name);
+      const without = pluginViews.filter((v) => !v.keys.length).map((v) => v.plugin.name);
+      return [
+        { title: "有设置", keys: withKeys },
+        { title: "没有设置", keys: without },
+        { title: "没有对应插件的设置", keys: sections.unclaimed },
+      ].filter((g) => g.keys.length);
+    }
+    return [{ title: "", keys: Object.keys(data).filter((k) => HEXO_CORE_KEYS.has(k)) }];
+  }, [info, view, data, themeDefaults, order, sections, pluginViews]);
 
   const q = query.trim().toLowerCase();
   const sectionText = (k: string) =>
     k === SEARCH_PANEL
       ? `搜索 search ${SEARCH_SERVICES.map((s) => searchText(s.key, data[s.key] ?? themeDefaults?.[s.key], hints)).join("\n")}`
-      : searchText(k, data[k] ?? themeDefaults?.[k], hints);
+      : view === "plugins" && pluginView(k)
+        ? [k, pluginView(k)!.plugin.description ?? "", ...pluginView(k)!.keys.map((key) => searchText(key, data[key], hints))].join("\n").toLowerCase()
+        : searchText(k, data[k] ?? themeDefaults?.[k], hints);
   const shownGroups = useMemo(
     () =>
       q
@@ -320,7 +338,8 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
                 <div key={gi} className="pb-2">
                   {g.title && <div className="group-label truncate pt-1" title={g.title}>{g.title}</div>}
                   {g.keys.map((k) => {
-                    const hint = k === SEARCH_PANEL ? "Algolia、本地搜索、DocSearch 三选一" : hints.get(pathKey([k]));
+                    const p = view === "plugins" ? pluginView(k)?.plugin : undefined;
+                    const hint = k === SEARCH_PANEL ? "Algolia、本地搜索、DocSearch 三选一" : p ? (p.version ? `${p.version} · ${p.description ?? ""}` : "没有安装") : hints.get(pathKey([k]));
                     return (
                       <button
                         key={k}
@@ -352,9 +371,15 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
                     {changedFromDefault(section) && <span className="rounded bg-brand-soft px-1.5 text-[11px] text-brand">已改动</span>}
                     {view === "theme" && section !== SEARCH_PANEL && !(section in data) && <span className="rounded bg-pill px-1.5 text-[11px] text-muted">仅在主题默认里，修改会写进 {files.theme?.path}</span>}
                   </div>
-                  {hints.get(pathKey([section])) && <div className="mt-0.5 text-[12px] text-muted">{hints.get(pathKey([section]))}</div>}
+                  {view === "plugins" && pluginView(section) ? (
+                    pluginView(section)!.plugin.description && <div className="mt-0.5 text-[12px] text-muted">{pluginView(section)!.plugin.description}</div>
+                  ) : (
+                    hints.get(pathKey([section])) && <div className="mt-0.5 text-[12px] text-muted">{hints.get(pathKey([section]))}</div>
+                  )}
                 </div>
-                {view === "theme" && section === SEARCH_PANEL ? (
+                {view === "plugins" && pluginView(section) ? (
+                  <PluginPanel view={pluginView(section)!} data={data} ctx={ctx} onError={(m) => toast(m, "error")} />
+                ) : view === "theme" && section === SEARCH_PANEL ? (
                   <SearchPanel {...panelProps} />
                 ) : view === "theme" && section === "comments" ? (
                   <CommentsPanel {...panelProps} />

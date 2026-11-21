@@ -83,6 +83,7 @@ pub fn run() {
             commands::blog_git_changes,
             commands::config_read,
             commands::config_write,
+            commands::list_plugins,
             commands::source_status,
             commands::source_commits,
             commands::source_commit_detail,

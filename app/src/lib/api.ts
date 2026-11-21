@@ -109,6 +109,19 @@ export interface ConfigText {
   fingerprint: string;
 }
 
+export interface Plugin {
+  name: string;
+  /** The version range package.json asks for. */
+  wanted: string;
+  /** Installed version; null when it is not in node_modules (Hexo then skips it). */
+  version: string | null;
+  description: string | null;
+  /** Its source on GitHub. */
+  repo: string | null;
+  /** Listed by the theme's package.json, not the blog's. */
+  fromTheme: boolean;
+}
+
 export type ConfigWrite = { status: "saved"; fingerprint: string } | { status: "conflict" };
 
 export type ChangeKind = "added" | "modified" | "deleted" | "renamed" | "untracked" | "conflicted";
@@ -350,6 +363,7 @@ export const api = {
   previewProbe: (path: string) => invoke<PageProbe>("preview_probe", { path }),
   previewAwaitChange: (path: string, before: PageProbe | null) => invoke<PageProbe>("preview_await_change", { path, before }),
   blogGitChanges: () => invoke<number | null>("blog_git_changes"),
+  listPlugins: () => invoke<Plugin[]>("list_plugins"),
   configRead: (file: ConfigFile) => invoke<ConfigText>("config_read", { file }),
   configWrite: (file: ConfigFile, text: string, expected: string) => invoke<ConfigWrite>("config_write", { file, text, expected }),
   sourceStatus: () => invoke<SourceStatus>("source_status"),

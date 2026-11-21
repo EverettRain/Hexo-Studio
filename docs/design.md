@@ -247,7 +247,7 @@ app/
 5. **M5 配置管理**（第 14 节），每一步都能端到端使用：
    1. ✅ 配置页 + 通用 YAML 树编辑器：三处配置文件的全部字段都能看、能改，保留注释与写法，标出与主题默认不同的值，保存后提示重启预览。
    2. ✅ 常用分组的专用控件（导航菜单树、评论 / 搜索“选一个再填”、图片字段接图片库、侧边栏卡片、页脚链接）。
-   3. 插件区：按 `package.json` 里已安装的插件列出各自的配置。
+   3. ✅ 插件区：按 `package.json` 里已安装的插件列出各自的配置。
    4. 页面数据：`source/_data` 里友链、相册、装备等的列表编辑。
 
 ## 10. 已确认的决定
@@ -382,6 +382,9 @@ M5 开工前确认：
 | 高级 | CDN（86 行）、pjax、lazyload、pwa、icons、inject | 通用编辑器；`inject` 用代码编辑框 |
 
 **插件**（`_config.yml` 里各插件的段）：`markdown`（markdown-it 及其插件）、`aplayer`、`bangumi`、`envelope_comment`、`footer_beautify`、`admin`。每段对应 `package.json` 里的一个包，按已安装的插件列出；没装的不显示。
+- （M5.3 实现）插件列表照 Hexo 7 自己的加载规则（`hexo/dist/hexo/load_plugins.js`）：博客 `package.json` 的 dependencies 与 devDependencies、主题目录 `package.json` 的 dependencies；名字是 `hexo-…` 或 `@作用域/hexo-…`，排除 `hexo-theme-…` 和 `@types/`。每个插件读出安装的版本、说明和 GitHub 地址（`repository` 的各种写法，没有时取 GitHub 上的 `homepage`），可打开 npm 与 GitHub 页面。`package.json` 里有但没装的标“没有安装”（Hexo 会跳过它）。
+- 配置段归属：键名的每个词都出现在包名里就算（`index_generator` → hexo-generator-index、`markdown` → hexo-renderer-markdown-it），对不上的写在 `lib/plugins.ts` 的小表里（`envelope_comment` → hexo-butterfly-envelope；Hexo 自身的 `server`、`deploy` 归到 hexo-server、hexo-deployer-git，站点栏里也照样有）。没有插件认领的非 Hexo 键单列为“没有对应插件的设置”。EverettBlog 的 17 个插件、7 段插件设置全部对上。
+- 本地脚本（博客 `scripts/` 目录）不是 npm 包，不在插件栏里。
 
 **页面数据**（`source/_data`）：友链、相册、装备等是一条条记录，用列表 / 卡片编辑，不放进配置表单（Q6）。
 
