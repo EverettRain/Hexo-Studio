@@ -7,7 +7,8 @@ export default defineConfig({
   plugins: [react()],
   base: "./",
   build: { outDir: "../dist", emptyOutDir: true, target: "es2021" },
-  server: { port: 3031, strictPort: true },
+  // The release notes in ../docs/releases are bundled for the changelog page.
+  server: { port: 3031, strictPort: true, fs: { allow: [".."] } },
   resolve: { alias: { "@": path.resolve(__dirname, "./src") } },
   clearScreen: false,
   envPrefix: ["VITE_", "TAURI_"],

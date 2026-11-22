@@ -1,6 +1,6 @@
 [package]
 name = "hexo-studio"
-version = "0.1.0"
+version = "1.0.0"
 description = "Hexo-Studio - write, preview and deploy a Hexo blog on macOS"
 edition = "2021"
 rust-version = "1.95"

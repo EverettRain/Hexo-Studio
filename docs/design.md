@@ -350,6 +350,7 @@ M5 开工前确认：
 - 私有仓库的 Release 不能匿名下载，应用拿不到 `latest.json`，所以仓库须公开（Q4）。
 - 发布：推送 `v*` 标签触发 GitHub Actions，在 macOS（Apple Silicon）上 `tauri build`，产出 `.dmg`、`.app.tar.gz` 与签名、`latest.json`，上传到 Release。不做 Apple 公证（个人自用；首次打开需右键“打开”），更新包由应用自己下载，不带隔离属性，不受影响。
 - 欢迎页启动时检查一次；有新版本显示版本号与“安装并重启”。
+- 版本说明手写在 `docs/releases/<标签>.md`：发布流程把它作为 GitHub Release 的说明，应用构建时也把这些文件打包进去，设置 → 关于 → 更新日志按版本从新到旧显示（只认标题、列表、段落和行内代码 / 加粗）。
 
 ## 14. 配置管理（M5）
 

@@ -1,5 +1,5 @@
 import { open } from "@tauri-apps/plugin-dialog";
-import { ArrowLeftRight, CheckCircle2, FolderSearch, Info, Paintbrush, RotateCcw, Server, User, XCircle } from "lucide-react";
+import { ArrowLeftRight, CheckCircle2, ChevronLeft, ChevronRight, FolderSearch, Info, Paintbrush, RotateCcw, Server, User, XCircle } from "lucide-react";
 import { useState } from "react";
 import { Avatar } from "@/components/Avatar";
 import { UpdateCard } from "@/components/UpdateCard";
@@ -10,6 +10,7 @@ import { Segmented } from "@/components/ui/segmented";
 import { useToast } from "@/components/ui/toast";
 import { api, errorText, type AppInfo, type BlogStatus, type ThemeMode } from "@/lib/api";
 import { usePreferences, useTheme } from "@/lib/preferences";
+import { inline, RELEASES } from "@/lib/changelog";
 import { THEMES, themeOf } from "@/lib/theme";
 import { cn } from "@/lib/utils";
 
@@ -27,7 +28,7 @@ const SECTIONS: { id: SectionId; label: string; hint: string; icon: React.Compon
   { id: "editor", label: "编辑器", hint: "主题、明暗", icon: Paintbrush },
   { id: "project", label: "项目", hint: "当前博客与站点", icon: FolderSearch },
   { id: "node", label: "Node", hint: "运行 Hexo 的 Node", icon: Server },
-  { id: "about", label: "关于", hint: "版本与更新、数据目录", icon: Info },
+  { id: "about", label: "关于", hint: "版本、更新日志", icon: Info },
 ];
 
 const MODES: { value: ThemeMode; label: string }[] = [
@@ -260,6 +261,8 @@ function NodeSection({ status, onStatus }: { status: BlogStatus | null; onStatus
 }
 
 function AboutSection({ info }: { info: AppInfo | null }) {
+  const [notes, setNotes] = useState(false);
+  if (notes) return <Changelog current={info?.version ?? null} onBack={() => setNotes(false)} />;
   return (
     <Group label="关于">
       <div className="px-4 py-3">
@@ -268,7 +271,68 @@ function AboutSection({ info }: { info: AppInfo | null }) {
           <UpdateCard version={info?.version ?? null} />
         </div>
       </div>
+      <Row label="更新日志" hint="每个版本新增和改动了什么。">
+        <Button variant="outline" size="sm" onClick={() => setNotes(true)}>
+          查看
+          <ChevronRight />
+        </Button>
+      </Row>
       <Row label="数据目录" hint={<span className="selectable break-all">{info?.dataDir}</span>} />
     </Group>
+  );
+}
+
+/** Every version's notes, newest first, as on the GitHub release page. */
+function Changelog({ current, onBack }: { current: string | null; onBack: () => void }) {
+  const text = (t: string) =>
+    inline(t).map((r, i) =>
+      r.style === "code" ? (
+        <code key={i} className="rounded-sm bg-pill px-1 font-mono text-[12px]">
+          {r.text}
+        </code>
+      ) : r.style === "bold" ? (
+        <strong key={i} className="font-semibold text-fg">
+          {r.text}
+        </strong>
+      ) : (
+        <span key={i}>{r.text}</span>
+      ),
+    );
+  return (
+    <div className="space-y-5">
+      <button onClick={onBack} className="-ml-1 flex items-center gap-1 rounded-control px-1 py-0.5 text-[12.5px] text-muted hover:text-fg active:!scale-100">
+        <ChevronLeft className="h-3.5 w-3.5" />
+        关于
+      </button>
+      {RELEASES.map((r) => (
+        <Group
+          key={r.version}
+          label={
+            <span className="flex items-center gap-2 normal-case tracking-normal">
+              <span className="font-mono text-[12px] font-semibold text-fg">v{r.version}</span>
+              {r.version === current && <span className="rounded-sm bg-brand-soft px-1.5 text-[11px] font-medium text-brand">当前版本</span>}
+            </span>
+          }
+        >
+          <div className="selectable space-y-2.5 px-4 py-3.5 text-[12.5px] leading-[20px] text-fg-2">
+            {r.blocks.map((b, i) =>
+              b.kind === "heading" ? (
+                <h3 key={i} className="pt-1 text-[13px] font-semibold text-fg first:pt-0">
+                  {text(b.text)}
+                </h3>
+              ) : b.kind === "paragraph" ? (
+                <p key={i}>{text(b.text)}</p>
+              ) : (
+                <ul key={i} className="list-disc space-y-1 pl-5 marker:text-faint">
+                  {b.items.map((it, j) => (
+                    <li key={j}>{text(it)}</li>
+                  ))}
+                </ul>
+              ),
+            )}
+          </div>
+        </Group>
+      ))}
+    </div>
   );
 }
