@@ -13,9 +13,10 @@
         overflow: hidden;
         /* Fixed-position dialogs stay inside the window, not the page. */
         transform: translateZ(0);
-        box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.22), 0 18px 48px rgb(0 0 0 / 0.32), 0 2px 8px rgb(0 0 0 / 0.12);
+        /* Offset + blur stays inside the 40px of desktop around the window, so nothing is cut off. */
+        box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.22), 0 10px 28px rgb(0 0 0 / 0.28), 0 2px 6px rgb(0 0 0 / 0.12);
       }
-      .dark .frame { box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.6), inset 0 0 0 0.5px rgb(255 255 255 / 0.14), 0 18px 48px rgb(0 0 0 / 0.42), 0 2px 8px rgb(0 0 0 / 0.2); }
+      .dark .frame { box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.6), inset 0 0 0 0.5px rgb(255 255 255 / 0.14), 0 10px 28px rgb(0 0 0 / 0.38), 0 2px 6px rgb(0 0 0 / 0.2); }
       /* A still picture: headless Chrome's virtual time does not run CSS animations. */
       *, *::before, *::after { animation: none !important; transition: none !important; }
       #root, .frame .h-screen { height: 100% !important; }
