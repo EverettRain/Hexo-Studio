@@ -1,6 +1,7 @@
 {
   "name": "hexo-studio",
   "version": "1.0.0",
+  "license": "MIT",
   "private": true,
   "description": "Hexo-Studio - write, preview and deploy a Hexo blog on macOS",
   "type": "module",

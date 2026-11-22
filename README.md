@@ -11,6 +11,7 @@
 ![macOS](https://img.shields.io/badge/macOS-11%2B%20·%20Apple%20Silicon-000000?style=flat-square&logo=apple)
 ![Tauri 2](https://img.shields.io/badge/Tauri-2.x-24C8DB?style=flat-square&logo=tauri)
 ![Hexo](https://img.shields.io/badge/Hexo-7%20%7C%208-0E83CD?style=flat-square&logo=hexo)
+![License: MIT](https://img.shields.io/badge/License-MIT-2e7d4a?style=flat-square)
 [![Release](https://img.shields.io/github/v/release/EverettRain/Hexo-Studio?style=flat-square)](https://github.com/EverettRain/Hexo-Studio/releases/latest)
 
 <picture>
@@ -34,6 +35,7 @@
 - [开发](#开发)
 - [发布](#发布)
 - [已知限制](#已知限制)
+- [License](#license)
 
 ## 功能概览
 
@@ -183,3 +185,7 @@ app/scripts/readme-screenshots.sh
 - 一个窗口同时只打开一个博客、只有一个预览服务器。
 - 配置页的专门控件、图片标签写法按安知鱼主题实现；其他主题可以用，配置落回通用编辑器。
 - 预览服务器不会重新读取 `_config.yml` 和主题配置，改了要重启预览（配置页会提示）。
+
+## License
+
+[MIT](LICENSE)
