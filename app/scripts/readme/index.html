@@ -1,0 +1,33 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Hexo-Studio</title>
+    <style>
+      /* The page is the desktop: transparent, with the window drawn as macOS draws it. */
+      html, body { background: transparent !important; margin: 0; height: 100%; overflow: hidden; }
+      .frame {
+        position: absolute;
+        inset: 40px;
+        border-radius: 16px;
+        overflow: hidden;
+        /* Fixed-position dialogs stay inside the window, not the page. */
+        transform: translateZ(0);
+        box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.22), 0 18px 48px rgb(0 0 0 / 0.32), 0 2px 8px rgb(0 0 0 / 0.12);
+      }
+      .dark .frame { box-shadow: 0 0 0 0.5px rgb(0 0 0 / 0.6), inset 0 0 0 0.5px rgb(255 255 255 / 0.14), 0 18px 48px rgb(0 0 0 / 0.42), 0 2px 8px rgb(0 0 0 / 0.2); }
+      /* A still picture: headless Chrome's virtual time does not run CSS animations. */
+      *, *::before, *::after { animation: none !important; transition: none !important; }
+      #root, .frame .h-screen { height: 100% !important; }
+      .lights { position: absolute; left: 18px; top: 18px; z-index: 100; display: flex; gap: 8px; pointer-events: none; }
+      .lights span { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 0.5px rgb(0 0 0 / 0.12); }
+    </style>
+  </head>
+  <body>
+    <div class="frame">
+      <div class="lights"><span style="background: #ff5f57"></span><span style="background: #febc2e"></span><span style="background: #28c840"></span></div>
+      <div id="root"></div>
+    </div>
+    <script type="module" src="./entry.ts"></script>
+  </body>
+</html>
