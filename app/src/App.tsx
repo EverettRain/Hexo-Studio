@@ -87,7 +87,13 @@ function ProjectWindow({ status, info, theme, onThemeChange, onStatus, onClose }
   useEffect(() => {
     void api.previewState().then(setPreview).catch(() => {});
     void refreshPosts();
-    return onEvent<PreviewState>("preview-state", setPreview);
+    const stopPreview = onEvent<PreviewState>("preview-state", setPreview);
+    // Another editor or git changed the posts: the list follows.
+    const stopPosts = onEvent("posts-changed", () => void refreshPosts());
+    return () => {
+      stopPreview();
+      stopPosts();
+    };
   }, [refreshPosts]);
 
   const onSaved = useCallback((s: PostSummary) => setPosts((list) => list?.map((p) => (p.id === s.id ? s : p)) ?? list), []);

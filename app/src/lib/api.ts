@@ -22,6 +22,8 @@ export interface UiPreferences {
   theme: string;
   /** The editor's preview column as a share of its width; null until dragged. */
   previewShare: number | null;
+  /** The editor's preview draws the Markdown as it is typed instead of the theme's page. */
+  instantPreview: boolean;
   /** Values kept in the WebView's storage before preferences existed were brought over. */
   webStorageMigrated: boolean;
 }
@@ -145,6 +147,18 @@ export interface PostFile {
   suffix: string;
   body: string;
   fingerprint: string;
+}
+
+/** A post changed outside the app; `fingerprint` is null when the file is gone. */
+export interface PostChange {
+  id: string;
+  fingerprint: string | null;
+}
+
+/** `posts-changed`: posts written by another editor or git. `rescan`: events were missed, anything may have changed. */
+export interface PostsChanged {
+  changes: PostChange[];
+  rescan: boolean;
 }
 
 export type WriteOutcome = { status: "saved"; summary: PostSummary; fingerprint: string } | { status: "conflict" };

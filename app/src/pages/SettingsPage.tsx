@@ -64,7 +64,7 @@ export function SettingsPage({ status, info, onStatus, onSwitchProject }: Settin
               key={s.id}
               onClick={() => setSection(s.id)}
               aria-current={active ? "true" : undefined}
-              className={cn("flex h-[46px] w-full items-center gap-3 rounded-lg px-3 text-left active:!scale-100", active ? "bg-brand-soft" : "hover:bg-pill")}
+              className={cn("flex h-list w-full items-center gap-3 rounded-lg px-3 text-left active:!scale-100", active ? "bg-brand-soft" : "hover:bg-pill")}
             >
               <Icon className={cn("h-4 w-4 shrink-0", active ? "text-brand" : "text-muted")} />
               <span className="min-w-0 flex-1">

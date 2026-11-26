@@ -406,7 +406,7 @@ export function ConfigPage({ preview, onStatus }: { preview: PreviewState; onSta
                         onClick={() => setSelected((s) => ({ ...s, [view]: k }))}
                         aria-current={active ? "true" : undefined}
                         className={cn(
-                          "flex h-[46px] w-full items-center gap-2 rounded-lg px-3 text-left active:!scale-100",
+                          "flex h-list w-full items-center gap-2 rounded-lg px-3 text-left active:!scale-100",
                           active ? "bg-brand-soft" : "hover:bg-pill",
                         )}
                       >

@@ -49,6 +49,12 @@ shot() {
   say "  $1.png"
 }
 
+# SHOTS="posts editor-light~vscode~dark" takes only these (names as in readme/mock.ts).
+if [ -n "${SHOTS:-}" ]; then
+  say "截图 → $OUT"
+  for s in $SHOTS; do case $s in editor*) shot "$s" 20000;; *) shot "$s";; esac; done
+  exit 0
+fi
 say "截图 → $OUT"
 for s in welcome new-blog posts images config config-vscode source deploy settings; do shot "$s"; done
 # The editor's preview loads the demo blog's page (and the theme's fonts and icons).

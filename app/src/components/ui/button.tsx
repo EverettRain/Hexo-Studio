@@ -14,9 +14,9 @@ const variants = {
 } as const;
 
 const sizes = {
-  default: "h-8 px-3.5 text-[13px]",
-  sm: "h-7 px-2.5 text-[12.5px]",
-  icon: "h-8 w-8",
+  default: "h-control px-3.5 text-[13px]",
+  sm: "h-control-sm px-2.5 text-[12.5px]",
+  icon: "h-control w-control",
   iconSm: "h-[26px] w-[26px] rounded-control",
 } as const;
 

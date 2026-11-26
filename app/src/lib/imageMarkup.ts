@@ -66,7 +66,7 @@ function parseTag(name: string, args: string): ImageMarkup | null {
 }
 
 /** Ranges of fenced code blocks, where image syntax is only shown, not rendered. */
-function fencedRanges(text: string): [number, number][] {
+export function fencedRanges(text: string): [number, number][] {
   const out: [number, number][] = [];
   const re = /^ {0,3}(`{3,}|~{3,})[^\n]*$/gm;
   let open: { at: number; fence: string } | null = null;

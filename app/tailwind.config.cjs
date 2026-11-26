@@ -23,6 +23,16 @@ module.exports = {
         raised: { DEFAULT: "var(--raised)", strong: "var(--raised-strong)" },
         scrim: "var(--scrim)",
       },
+      // The theme's density (index.css): h-control, h-nav, py-row, ...
+      spacing: {
+        control: "var(--h-control)",
+        "control-sm": "var(--h-control-sm)",
+        segment: "var(--h-segment)",
+        nav: "var(--h-nav)",
+        list: "var(--h-list)",
+        row: "var(--pad-row)",
+        item: "var(--pad-item)",
+      },
       boxShadow: {
         edge: "var(--edge)",
         card: "var(--card-edge)",

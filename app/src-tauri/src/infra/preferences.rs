@@ -34,6 +34,8 @@ pub struct UiPreferences {
     pub theme: String,
     /// The editor's preview column, as a share of the editor's width; `None` until it is dragged.
     pub preview_share: Option<f32>,
+    /// The editor's preview draws the Markdown as it is typed instead of the theme's page.
+    pub instant_preview: bool,
     /// The values the interface kept in the WebView's storage before preferences existed have
     /// been brought over.
     pub web_storage_migrated: bool,

@@ -41,7 +41,7 @@ export function Group({ label, action, children, className }: { label?: React.Re
 /** A settings-style row inside a list card: label and hint on the left, control on the right. */
 export function Row({ label, hint, children }: { label: React.ReactNode; hint?: React.ReactNode; children?: React.ReactNode }) {
   return (
-    <div className="flex items-center justify-between gap-6 px-4 py-3">
+    <div className="flex items-center justify-between gap-6 px-4 py-row">
       <div className="min-w-0">
         <div className="text-[13px] font-medium">{label}</div>
         {hint && <div className="mt-0.5 text-[12px] leading-[18px] text-muted">{hint}</div>}

@@ -52,7 +52,7 @@ function NavRow({ item, active, onSelect, setRef }: { item: NavItem; active: boo
       onClick={onSelect}
       aria-current={active ? "page" : undefined}
       className={cn(
-        "relative z-10 flex h-[30px] w-full items-center gap-[9px] rounded-control px-2 text-left text-[13px] active:!scale-100",
+        "relative z-10 flex h-nav w-full items-center gap-[9px] rounded-control px-2 text-left text-[13px] active:!scale-100",
         active ? "font-medium text-fg" : "text-fg-2 hover:bg-pill hover:text-fg",
       )}
     >
@@ -124,7 +124,7 @@ export function AppShell({ activePage, onPageChange, theme, onThemeChange, previ
           {thumb !== null && (
             <span
               aria-hidden
-              className="absolute inset-x-2.5 h-[30px] rounded-control bg-raised shadow-edge transition-[top] duration-300 ease-soft"
+              className="absolute inset-x-2.5 h-nav rounded-control bg-raised shadow-edge transition-[top] duration-300 ease-soft"
               style={{ top: thumb }}
             />
           )}

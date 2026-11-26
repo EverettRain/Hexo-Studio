@@ -38,6 +38,17 @@ const theme = EditorView.theme({
   ".cm-placeholder": { color: "rgb(var(--faint))" },
 });
 
+/** Only the part between the common start and end changes, so the cursor and the scroll position
+ *  stay where they were when the text is replaced from outside (a reload). */
+export function changedRange(before: string, after: string): { from: number; to: number; insert: string } {
+  let start = 0;
+  const max = Math.min(before.length, after.length);
+  while (start < max && before.charCodeAt(start) === after.charCodeAt(start)) start++;
+  let end = 0;
+  while (end < max - start && before.charCodeAt(before.length - 1 - end) === after.charCodeAt(after.length - 1 - end)) end++;
+  return { from: start, to: before.length - end, insert: after.slice(start, after.length - end) };
+}
+
 /** A toolbar edit as a key binding. */
 const bind = (key: string, cmd: MdCommand) => ({
   key,
@@ -203,7 +214,7 @@ export function MarkdownEditor({ value, onChange, onSave, onPasteImages, onForma
 
   useEffect(() => {
     const v = view.current;
-    if (v && v.state.doc.toString() !== value) v.dispatch({ changes: { from: 0, to: v.state.doc.length, insert: value } });
+    if (v && v.state.doc.toString() !== value) v.dispatch({ changes: changedRange(v.state.doc.toString(), value) });
   }, [value]);
 
   return <div ref={host} className="selectable" />;

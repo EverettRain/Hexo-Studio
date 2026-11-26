@@ -30,7 +30,7 @@ describe("fromWebStorage", () => {
 
   it("leaves preferences that were already migrated alone", () => {
     // Arrange
-    const saved: UiPreferences = { mode: "light", theme: "default", previewShare: 0.6, webStorageMigrated: true };
+    const saved: UiPreferences = { ...DEFAULT_UI, mode: "light", previewShare: 0.6 };
 
     // Act
     const ui = fromWebStorage(saved, storage({ [WEB_STORAGE_KEYS.mode]: "dark" }));

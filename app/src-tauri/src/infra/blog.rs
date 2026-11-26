@@ -175,15 +175,24 @@ impl Blog {
     }
 
     /// Writes a post, unless the file no longer holds the content `expected` names (changed by
-    /// another editor or git since it was read): then `Conflict`, and nothing is written.
+    /// another editor or git since it was read): then `Conflict`, and nothing is written. An
+    /// empty `expected` stands for a file that is not there (deleted elsewhere).
     ///
     /// The file is rewritten in place rather than replaced, so it keeps its creation time: Hexo
     /// dates a post without a `date` by it, and a new file would move the post's address.
     pub fn write_post(&self, id: &str, text: &str, expected: &str) -> Result<WriteOutcome, String> {
         let (kind, path, file_name) = self.post_path(id)?;
-        let current = std::fs::read_to_string(&path).map_err(|e| format!("无法读取 {id}：{e}"))?;
-        if fingerprint(&current) != expected {
+        // A file deleted elsewhere is written again only when asked with an empty `expected`.
+        let current = match std::fs::read_to_string(&path) {
+            Ok(text) => Some(fingerprint(&text)),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => None,
+            Err(e) => return Err(format!("无法读取 {id}：{e}")),
+        };
+        if current.as_deref().unwrap_or("") != expected {
             return Ok(WriteOutcome::Conflict);
+        }
+        if let Some(dir) = path.parent() {
+            std::fs::create_dir_all(dir).map_err(|e| format!("无法保存 {id}：{e}"))?;
         }
         std::fs::write(&path, text).map_err(|e| format!("无法保存 {id}：{e}"))?;
         let meta = std::fs::metadata(&path).map_err(|e| e.to_string())?;
@@ -325,6 +334,25 @@ impl Blog {
     }
 }
 
+/// The post id of a file under `source` (`_posts/a.md`), as `list_posts` names it; `None` for
+/// anything else (other folders, other files, hidden ones).
+pub fn post_id(source: &Path, path: &Path) -> Option<String> {
+    let rel = path.strip_prefix(source).ok()?;
+    let mut parts = rel.components();
+    let folder = match parts.next()? {
+        Component::Normal(f) if f == "_posts" || f == "_drafts" => f.to_string_lossy().into_owned(),
+        _ => return None,
+    };
+    let inner: Vec<String> = parts.map(|c| c.as_os_str().to_string_lossy().into_owned()).collect();
+    let markdown = path.extension().is_some_and(|x| x == "md" || x == "markdown");
+    (markdown && !inner.is_empty() && !inner.iter().any(|p| p.starts_with('.'))).then(|| format!("{folder}/{}", inner.join("/")))
+}
+
+/// Whether a changed path can change the list of posts: a post, or a folder under `_posts` / `_drafts`.
+pub fn in_post_folders(source: &Path, path: &Path) -> bool {
+    path.strip_prefix(source).ok().and_then(|r| r.components().next()).is_some_and(|c| matches!(c, Component::Normal(f) if f == "_posts" || f == "_drafts"))
+}
+
 fn collect_markdown(dir: &Path, out: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(dir) else { return };
     for e in entries.flatten() {
@@ -343,6 +371,43 @@ fn collect_markdown(dir: &Path, out: &mut Vec<PathBuf>) {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn post_ids_come_from_markdown_under_posts_and_drafts() {
+        // Arrange
+        let source = Path::new("/b/source");
+
+        // Act / Assert
+        assert_eq!(post_id(source, Path::new("/b/source/_posts/a.md")).as_deref(), Some("_posts/a.md"));
+        assert_eq!(post_id(source, Path::new("/b/source/_drafts/x/y.markdown")).as_deref(), Some("_drafts/x/y.markdown"));
+        assert_eq!(post_id(source, Path::new("/b/source/_posts/.a.md.swp")), None);
+        assert_eq!(post_id(source, Path::new("/b/source/_posts/img.png")), None);
+        assert_eq!(post_id(source, Path::new("/b/source/about/index.md")), None);
+        assert_eq!(post_id(source, Path::new("/b/source/_posts")), None);
+        assert!(in_post_folders(source, Path::new("/b/source/_posts/new-folder")));
+        assert!(!in_post_folders(source, Path::new("/b/source/_data/link.yml")));
+    }
+
+    #[test]
+    fn a_deleted_post_is_written_again_only_when_asked() {
+        // Arrange
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::write(dir.path().join("_config.yml"), "title: t\n").unwrap();
+        std::fs::write(dir.path().join("package.json"), r#"{"dependencies":{"hexo":"^7"}}"#).unwrap();
+        std::fs::create_dir_all(dir.path().join("source/_posts")).unwrap();
+        let blog = open(dir.path()).unwrap();
+
+        // Act
+        let kept = blog.write_post("_posts/gone.md", "a", &fingerprint("old")).unwrap();
+        let written = blog.write_post("_posts/gone.md", "a", "").unwrap();
+        let again = blog.write_post("_posts/gone.md", "b", "").unwrap();
+
+        // Assert
+        assert!(matches!(kept, WriteOutcome::Conflict));
+        assert!(matches!(written, WriteOutcome::Saved { .. }));
+        assert!(matches!(again, WriteOutcome::Conflict), "an existing file is never overwritten blind");
+        assert_eq!(std::fs::read_to_string(dir.path().join("source/_posts/gone.md")).unwrap(), "a");
+    }
+
     use super::*;
 
     fn blog() -> (tempfile::TempDir, Blog) {

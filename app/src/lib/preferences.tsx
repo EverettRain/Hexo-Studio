@@ -2,7 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { api, type ThemeMode, type UiPreferences, type UserView } from "@/lib/api";
 import { applyTheme, watchSystemTheme } from "@/lib/theme";
 
-export const DEFAULT_UI: UiPreferences = { mode: "system", theme: "default", previewShare: null, webStorageMigrated: true };
+export const DEFAULT_UI: UiPreferences = { mode: "system", theme: "default", previewShare: null, instantPreview: false, webStorageMigrated: true };
 
 /** Where the interface kept these before preferences existed. */
 export const WEB_STORAGE_KEYS = { mode: "hexo-studio.theme", previewShare: "hexo-studio.preview-width" } as const;

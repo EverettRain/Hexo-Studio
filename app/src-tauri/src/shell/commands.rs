@@ -13,7 +13,7 @@ use crate::infra::node_env::{self, NodeEnv};
 use crate::infra::preferences::UiPreferences;
 use crate::infra::project::{Profile, ProjectSettings, UploadSettings};
 use crate::infra::store::Store;
-use crate::infra::{git, keychain, paths, preferences, project, user};
+use crate::infra::{git, keychain, paths, preferences, project, user, watch};
 use crate::service::adopt;
 use crate::service::create::{Creator, Progress};
 use crate::service::images;
@@ -31,6 +31,8 @@ use tauri_plugin_opener::OpenerExt as _;
 #[derive(Default)]
 pub struct Workspace {
     project: Mutex<Option<PathBuf>>,
+    /// Reports posts changed from outside the app (`posts-changed`) while the project is open.
+    watch: Mutex<Option<watch::Watch>>,
 }
 
 type Ws<'a> = State<'a, Workspace>;
@@ -176,7 +178,7 @@ pub async fn recent_projects() -> Result<Vec<ProjectCard>, String> {
 /// Opens a blog folder as the project: checks it, ends a preview server an earlier run left
 /// for it, prepares `.hexostudio/` and puts it first in the recent list.
 #[tauri::command]
-pub async fn open_project(ws: Ws<'_>, preview: Prev<'_>, runner: Run<'_>, path: String) -> Result<BlogStatus, String> {
+pub async fn open_project(app: AppHandle, ws: Ws<'_>, preview: Prev<'_>, runner: Run<'_>, path: String) -> Result<BlogStatus, String> {
     if runner.busy() {
         return Err("还有命令在执行，结束后再切换项目。".into());
     }
@@ -194,6 +196,12 @@ pub async fn open_project(ws: Ws<'_>, preview: Prev<'_>, runner: Run<'_>, path: 
     .await?;
     runner.clear();
     *ws.project.lock().unwrap() = Some(root.clone());
+    // The editor still saves safely without it (a changed file is a conflict), so a folder that
+    // cannot be watched only costs the live refresh.
+    let watching = watch::posts(&root, move |c| {
+        let _ = app.emit("posts-changed", c);
+    });
+    *ws.watch.lock().unwrap() = watching.map_err(|e| paths::log(&e)).ok();
     blocking(move || Ok(status(Some(&root)))).await
 }
 
@@ -209,6 +217,7 @@ pub async fn close_project(ws: Ws<'_>, preview: Prev<'_>, runner: Run<'_>) -> Re
         Ok(())
     })
     .await?;
+    *ws.watch.lock().unwrap() = None;
     *ws.project.lock().unwrap() = None;
     Ok(())
 }

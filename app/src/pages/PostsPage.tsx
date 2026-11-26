@@ -26,7 +26,7 @@ function matches(p: PostSummary, q: string): boolean {
 
 function PostRow({ post, onOpen }: { post: PostSummary; onOpen: () => void }) {
   return (
-    <button onClick={onOpen} className="flex w-full items-center gap-4 px-4 py-2.5 text-left hover:bg-pill/60 active:!scale-100">
+    <button onClick={onOpen} className="flex w-full items-center gap-4 px-4 py-item text-left hover:bg-pill/60 active:!scale-100">
       <div className="min-w-0 flex-1">
         <div className="truncate text-[13.5px] font-medium">{post.title || <span className="text-muted">（无标题）{post.fileName}</span>}</div>
         <div className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[12px] text-muted">

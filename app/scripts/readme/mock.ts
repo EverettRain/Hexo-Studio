@@ -3,7 +3,8 @@
 
 type Json = Record<string, any>;
 
-const shot = location.hash.slice(1) || "posts";
+// `#posts` takes the shot as listed below; `#posts~vscode~dark` draws it in another theme and mode.
+const [shot, themeOverride, modeOverride] = (location.hash.slice(1) || "posts").split("~");
 const demo: Promise<Json> = fetch("./demo.json").then((r) => r.json());
 const BLOG_DIR = "/Users/qingchuan/Blogs/qingchuan-blog";
 const DATA_DIR = "/Users/qingchuan/Library/Application Support/Hexo-Studio";
@@ -16,6 +17,7 @@ const SHOTS: Record<string, { open: boolean; mode: "light" | "dark"; theme: stri
   posts: { open: true, mode: "light", theme: "default", steps: [] },
   "editor-light": { open: true, mode: "light", theme: "default", steps: [["用 Hexo 搭一个自己的博客"]] },
   "editor-dark": { open: true, mode: "dark", theme: "default", steps: [["用 Hexo 搭一个自己的博客"]] },
+  "editor-instant": { open: true, mode: "light", theme: "default", steps: [["用 Hexo 搭一个自己的博客"]] },
   images: { open: true, mode: "light", theme: "default", steps: [["图片", true]] },
   config: { open: true, mode: "light", theme: "default", steps: [["配置", true], ["主题", true], ["menu"]] },
   source: { open: true, mode: "light", theme: "default", steps: [["源码", true], ["写完《用 Hexo 搭一个自己的博客》"]] },
@@ -23,7 +25,9 @@ const SHOTS: Record<string, { open: boolean; mode: "light" | "dark"; theme: stri
   settings: { open: true, mode: "light", theme: "default", steps: [["设置", true], ["编辑器"]] },
   "config-vscode": { open: true, mode: "light", theme: "vscode", steps: [["配置", true], ["主题", true], ["aside"]] },
 };
-const plan = SHOTS[shot] ?? SHOTS.posts;
+const plan = { ...(SHOTS[shot] ?? SHOTS.posts) };
+if (themeOverride) plan.theme = themeOverride;
+if (modeOverride === "light" || modeOverride === "dark") plan.mode = modeOverride;
 
 const config = (d: Json) => ({
   title: d.title,
@@ -85,7 +89,7 @@ async function answer(cmd: string, args: Json): Promise<unknown> {
     case "app_info":
       return { version: "1.0.0", dataDir: DATA_DIR };
     case "ui_preferences":
-      return { mode: plan.mode, theme: plan.theme, previewShare: 0.5, webStorageMigrated: true };
+      return { mode: plan.mode, theme: plan.theme, previewShare: 0.5, instantPreview: shot === "editor-instant", webStorageMigrated: true };
     case "user_profile":
       return { name: d.author, avatar: null };
     case "blog_status":
@@ -142,6 +146,8 @@ async function answer(cmd: string, args: Json): Promise<unknown> {
       return [{ id: 1, task: { kind: "deploy" }, label: "部署", status: "succeeded", startedAt: Date.now() - 95_000, endedAt: Date.now() - 71_000, lines: deployLog.map((text) => ({ stream: "out", level: "info", text })), problems: [], notes: [], created: null }];
     case "plugin:updater|check":
     case "plugin:event|listen":
+      (listeners[args.event] ??= []).push(args.handler);
+      return args.handler;
     case "plugin:event|unlisten":
     default:
       return null;
@@ -149,10 +155,17 @@ async function answer(cmd: string, args: Json): Promise<unknown> {
 }
 
 let nextId = 1;
+const callbacks: Record<number, (e: unknown) => void> = {};
+const listeners: Record<string, number[]> = {};
+/** Sends an event as the Rust side would (for trying the interface by hand: `__emit("posts-changed", ...)`). */
+(window as any).__emit = (event: string, payload: unknown) => (listeners[event] ?? []).forEach((id) => callbacks[id]?.({ event, payload, id: 0 }));
 (window as any).__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
 (window as any).__TAURI_INTERNALS__ = {
   metadata: { currentWindow: { label: "main" }, currentWebview: { label: "main", windowLabel: "main" } },
-  transformCallback: () => nextId++,
+  transformCallback: (cb: (e: unknown) => void) => {
+    callbacks[nextId] = cb;
+    return nextId++;
+  },
   unregisterCallback() {},
   invoke: (cmd: string, args: Json = {}) => answer(cmd, args),
 };

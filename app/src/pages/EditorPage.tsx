@@ -4,14 +4,16 @@ import { EditorToolbar } from "@/components/EditorToolbar";
 import { FrontMatterHeader } from "@/components/FrontMatterHeader";
 import { ImageStylePopover } from "@/components/ImageStylePopover";
 import { MarkdownEditor, type EditorHandle } from "@/components/MarkdownEditor";
+import { InstantPreview } from "@/components/InstantPreview";
 import { PreviewPane } from "@/components/PreviewPane";
+import { Segmented } from "@/components/ui/segmented";
 import { Button } from "@/components/ui/button";
 import { Dialog } from "@/components/ui/dialog";
 import { useToast } from "@/components/ui/toast";
 import { ImagePicker, type PickPurpose } from "@/components/ImagePicker";
 import { useImport } from "@/components/ImportPanel";
-import { api, errorText, type BlogConfigView, type InsertStyle, type Library, type PageProbe, type PostFile, type PostSummary, type PreviewState } from "@/lib/api";
-import { applyEdits } from "@/lib/frontmatter";
+import { api, errorText, onEvent, type BlogConfigView, type PostsChanged, type InsertStyle, type Library, type PageProbe, type PostFile, type PostSummary, type PreviewState } from "@/lib/api";
+import { applyEdits, readFrontMatter } from "@/lib/frontmatter";
 import { newImage, renderImage, type FoundImage, type ImageMarkup } from "@/lib/imageMarkup";
 import { ownFileName } from "@/lib/imageImport";
 import { describeImage, indexImages } from "@/lib/images";
@@ -57,6 +59,8 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
   const [width, setWidth] = useState(prefs.ui.previewShare ?? 0.5);
   // Saved once the drag ends; a ref, because the drag's handlers outlive this render.
   const saveShare = useRef((w: number) => prefs.update({ previewShare: w }));
+  /** The conflict is that the file was deleted (or renamed) elsewhere. */
+  const [gone, setGone] = useState(false);
   const [publishing, setPublishing] = useState<"ask" | "busy" | null>(null);
   const editor = useRef<EditorHandle>(null);
   const active = usePageActive();
@@ -64,6 +68,10 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
   const [picking, setPicking] = useState<PickPurpose | null>(null);
   const [fmt, setFmt] = useState<FormatState | null>(null);
   const words = useMemo(() => wordCount(body), [body]);
+  const previewTitle = useMemo(() => {
+    const t = readFrontMatter(yaml).values?.title;
+    return typeof t === "string" ? t : "";
+  }, [yaml]);
   const [insertStyle, setInsertStyle] = useState<InsertStyle>("image");
   const [library, setLibrary] = useState<Library | null>(null);
   const [cards, setCards] = useState(true);
@@ -118,6 +126,7 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
       setYaml(f.yaml);
       setBody(f.body);
       setState("saved");
+      setGone(false);
       setSaveError(null);
       setLoadError(null);
     } catch (e) {
@@ -157,7 +166,8 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
         if (preview.state === "running" && before) probe = await api.previewProbe(before).catch(() => null);
         try {
           let expected = d.file.fingerprint;
-          if (overwrite) expected = (await api.readPost(id)).fingerprint;
+          // "Keep mine": over whatever is there now, or as a new file when it was deleted ("").
+          if (overwrite) expected = await api.readPost(id).then((f) => f.fingerprint, () => "");
           const r = await api.writePost(id, text, expected);
           if (r.status === "conflict") {
             setState("conflict");
@@ -165,6 +175,7 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
           }
           const saved: PostFile = { ...d.file, summary: r.summary, fingerprint: r.fingerprint, yaml: y, body: b, prefix: hasFront ? d.file.prefix || "---\n" : "", suffix: hasFront ? d.file.suffix || "---\n" : "" };
           disk.current = { file: saved, yaml: y, body: b };
+          setGone(false);
           setFile(saved);
           setSaveError(null);
           const c = current.current;
@@ -186,6 +197,34 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
       saving.current = null;
     },
     [config, id, onSaved, preview.state],
+  );
+
+  // The file changed outside the app (another editor, git). Without unsaved edits the new content
+  // simply loads, as in VS Code; with them, autosave stops and the banner asks which to keep.
+  useEffect(
+    () =>
+      onEvent<PostsChanged>("posts-changed", (e) => {
+        const change = e.changes.find((c) => c.id === id);
+        if (!change && !e.rescan) return;
+        void (async () => {
+          // Our own save comes back here too: compare once it has finished.
+          if (saving.current) await saving.current;
+          const d = disk.current;
+          if (!d) return;
+          const now = change ? change.fingerprint : await api.readPost(id).then((f) => f.fingerprint, () => null);
+          if (now === d.file.fingerprint) return;
+          const c = current.current;
+          if (now !== null && c.yaml === d.yaml && c.body === d.body) {
+            await load();
+            toast("这篇文章在别处被修改了，已载入新内容。");
+            return;
+          }
+          window.clearTimeout(timer.current);
+          setGone(now === null);
+          setState("conflict");
+        })();
+      }),
+    [id, load, toast],
   );
 
   useEffect(() => {
@@ -350,6 +389,17 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
         <button title="用默认编辑器打开" onClick={() => void api.openPostExternally(id).catch((e) => toast(errorText(e), "error"))} className="flex h-[26px] w-[26px] items-center justify-center rounded-control text-muted hover:bg-pill hover:text-fg">
           <ExternalLink className="h-[15px] w-[15px]" />
         </button>
+        {showPreview && (
+          <Segmented
+            value={prefs.ui.instantPreview ? "instant" : "theme"}
+            onChange={(v) => prefs.update({ instantPreview: v === "instant" })}
+            options={[
+              { value: "theme", label: "主题", title: "主题的真实页面（hexo server），保存后刷新" },
+              { value: "instant", label: "即时", title: "边写边显示 Markdown，不必保存；标签插件只标出名字" },
+            ]}
+            className="mx-1"
+          />
+        )}
         <button title={showPreview ? "隐藏预览" : "显示预览"} onClick={() => setShowPreview((s) => !s)} className="flex h-[26px] w-[26px] items-center justify-center rounded-control text-muted hover:bg-pill hover:text-fg">
           {showPreview ? <PanelRightClose className="h-[15px] w-[15px]" /> : <PanelRightOpen className="h-[15px] w-[15px]" />}
         </button>
@@ -358,12 +408,20 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
       {state === "conflict" && (
         <div className="flex shrink-0 items-center gap-2 bg-danger-soft px-4 py-2 text-[12.5px] text-danger">
           <AlertTriangle className="h-4 w-4 shrink-0" />
-          <span className="flex-1">这篇文章在别处（其他编辑器或 git）被修改了，自动保存已暂停。</span>
-          <Button size="sm" variant="outline" onClick={() => void load()}>
-            重新载入（放弃我的修改）
-          </Button>
+          <span className="flex-1">
+            {gone ? "这篇文章在别处（其他编辑器或 git）被删除或改名了，自动保存已暂停。" : "这篇文章在别处（其他编辑器或 git）被修改了，自动保存已暂停。"}
+          </span>
+          {gone ? (
+            <Button size="sm" variant="outline" onClick={onClose}>
+              关闭（放弃我的内容）
+            </Button>
+          ) : (
+            <Button size="sm" variant="outline" onClick={() => void load()}>
+              重新载入（放弃我的修改）
+            </Button>
+          )}
           <Button size="sm" variant="destructive" onClick={() => void save(true)}>
-            保留我的版本
+            {gone ? "按我的版本重新保存" : "保留我的版本"}
           </Button>
         </div>
       )}
@@ -469,7 +527,11 @@ export function EditorPage({ id, config, preview, posts, onClose, onSaved, onPub
           <>
             <div onPointerDown={startDrag} className="w-[5px] shrink-0 cursor-col-resize border-l-[0.5px] border-line bg-bg hover:bg-pill" />
             <div style={{ width: `${width * 100}%` }} className="min-w-0 shrink-0">
-              <PreviewPane preview={preview} path={sitePath(config, file.summary)} root={config.root} reloadKey={reloadKey} onStart={() => void api.previewStart().catch(() => {})} />
+              {prefs.ui.instantPreview ? (
+                <InstantPreview title={previewTitle} body={body} origin={preview.state === "running" ? `http://127.0.0.1:${preview.port}` : null} />
+              ) : (
+                <PreviewPane preview={preview} path={sitePath(config, file.summary)} root={config.root} reloadKey={reloadKey} onStart={() => void api.previewStart().catch(() => {})} />
+              )}
             </div>
           </>
         )}
